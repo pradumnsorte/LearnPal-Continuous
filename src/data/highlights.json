@@ -1,0 +1,152 @@
+[
+  {
+    "id": "h1",
+    "text": "Neural networks seem complicated, but this series breaks them down step by step.",
+    "timestampSeconds": 22,
+    "timestampStr": "0:22"
+  },
+  {
+    "id": "h2",
+    "text": "The goal: understand what neural networks do and how they do it — no more black box.",
+    "timestampSeconds": 51,
+    "timestampStr": "0:51"
+  },
+  {
+    "id": "h3",
+    "text": "Part 2 covers backpropagation — how neural networks are actually trained on data.",
+    "timestampSeconds": 58,
+    "timestampStr": "0:58"
+  },
+  {
+    "id": "h4",
+    "text": "The example problem: predict if a drug dosage (low/medium/high) will be effective.",
+    "timestampSeconds": 123,
+    "timestampStr": "2:03"
+  },
+  {
+    "id": "h5",
+    "text": "A straight line can't fit this data — a neural network fits a squiggle instead.",
+    "timestampSeconds": 166,
+    "timestampStr": "2:46"
+  },
+  {
+    "id": "h6",
+    "text": "A neural network can fit a squiggle to even very complicated datasets.",
+    "timestampSeconds": 200,
+    "timestampStr": "3:20"
+  },
+  {
+    "id": "h7",
+    "text": "A neural network = nodes + connections with parameter values estimated from data.",
+    "timestampSeconds": 222,
+    "timestampStr": "3:42"
+  },
+  {
+    "id": "h8",
+    "text": "Parameters are like slope and intercept in linear regression — estimated by fitting.",
+    "timestampSeconds": 238,
+    "timestampStr": "3:58"
+  },
+  {
+    "id": "h9",
+    "text": "The bent/curved lines inside nodes (activation functions) are what let the network create squiggles.",
+    "timestampSeconds": 288,
+    "timestampStr": "4:48"
+  },
+  {
+    "id": "h10",
+    "text": "Common activation functions: Soft Plus (smooth curve), ReLU (bent line), Sigmoid (S-curve).",
+    "timestampSeconds": 310,
+    "timestampStr": "5:10"
+  },
+  {
+    "id": "h11",
+    "text": "Activation function terminology alert: the curved/bent lines inside nodes are called activation functions.",
+    "timestampSeconds": 343,
+    "timestampStr": "5:43"
+  },
+  {
+    "id": "h12",
+    "text": "In practice, ReLU and Soft Plus are more common than Sigmoid, despite what tutorials teach.",
+    "timestampSeconds": 363,
+    "timestampStr": "6:03"
+  },
+  {
+    "id": "h13",
+    "text": "Hidden layers are the node layers between input and output — you decide how many to use.",
+    "timestampSeconds": 430,
+    "timestampStr": "7:10"
+  },
+  {
+    "id": "h14",
+    "text": "Even complex neural networks are built from the same simple parts as this one hidden-layer example.",
+    "timestampSeconds": 460,
+    "timestampStr": "7:40"
+  },
+  {
+    "id": "h15",
+    "text": "Step 1: input × weight + bias → x-axis value fed into the activation function.",
+    "timestampSeconds": 512,
+    "timestampStr": "8:32"
+  },
+  {
+    "id": "h16",
+    "text": "The activation function's output becomes the y-axis value — here: log(1 + e^2.14) = 2.25.",
+    "timestampSeconds": 546,
+    "timestampStr": "9:06"
+  },
+  {
+    "id": "h17",
+    "text": "Only a narrow portion (red box) of the activation function is used — determined by the input range.",
+    "timestampSeconds": 663,
+    "timestampStr": "11:03"
+  },
+  {
+    "id": "h18",
+    "text": "Scaling the blue curve by –1.3 flips and stretches it into a new shape.",
+    "timestampSeconds": 706,
+    "timestampStr": "11:46"
+  },
+  {
+    "id": "h19",
+    "text": "The second hidden node uses different weights (–2.52, +1.29) and produces the orange curve.",
+    "timestampSeconds": 758,
+    "timestampStr": "12:38"
+  },
+  {
+    "id": "h20",
+    "text": "Blue curve + orange curve = green squiggle that fits the dosage data perfectly.",
+    "timestampSeconds": 906,
+    "timestampStr": "15:06"
+  },
+  {
+    "id": "h21",
+    "text": "Final step: subtract a bias (0.58) to shift the squiggle down to fit the data.",
+    "timestampSeconds": 912,
+    "timestampStr": "15:12"
+  },
+  {
+    "id": "h22",
+    "text": "Prediction: dosage 0.5 → squiggle y = 1.03 → closer to 1 → effective.",
+    "timestampSeconds": 968,
+    "timestampStr": "16:08"
+  },
+  {
+    "id": "h23",
+    "text": "Why 'neural network'? Nodes were thought to resemble neurons; connections resemble synapses (1940s–50s).",
+    "timestampSeconds": 1005,
+    "timestampStr": "16:45"
+  },
+  {
+    "id": "h24",
+    "text": "Weights multiply, biases add — the two types of parameters in any neural network.",
+    "timestampSeconds": 1037,
+    "timestampStr": "17:17"
+  },
+  {
+    "id": "h25",
+    "text": "With more hidden layers and nodes, a neural network can fit nearly any dataset — that's deep learning.",
+    "timestampSeconds": 1065,
+    "timestampStr": "17:45"
+  }
+]

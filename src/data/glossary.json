@@ -1,0 +1,128 @@
+[
+  {
+    "id": "g1",
+    "term": "Neural Network",
+    "definition": "A computational model made of nodes and connections that fits curved lines (squiggles) to data, enabling predictions on new inputs.",
+    "timestampSeconds": 22,
+    "timestampStr": "0:22"
+  },
+  {
+    "id": "g2",
+    "term": "Black Box",
+    "definition": "A description for neural networks where the internal workings are hard to interpret — this series aims to open the box and explain each step.",
+    "timestampSeconds": 31,
+    "timestampStr": "0:31"
+  },
+  {
+    "id": "g3",
+    "term": "Backpropagation",
+    "definition": "The algorithm used to fit (train) a neural network to data by estimating the best parameter values. Covered in depth in Part 2 of the series.",
+    "timestampSeconds": 58,
+    "timestampStr": "0:58"
+  },
+  {
+    "id": "g4",
+    "term": "Parameters",
+    "definition": "The numerical values on each connection in a neural network — analogous to the slope and intercept of a line — estimated during training.",
+    "timestampSeconds": 229,
+    "timestampStr": "3:49"
+  },
+  {
+    "id": "g5",
+    "term": "Activation Function",
+    "definition": "The bent or curved line inside each hidden-layer node that allows the network to fit non-linear (squiggly) patterns in data.",
+    "timestampSeconds": 343,
+    "timestampStr": "5:43"
+  },
+  {
+    "id": "g6",
+    "term": "Soft Plus",
+    "definition": "A smooth, curved activation function used in this StatQuest. Its output is computed as log(1 + e^x), producing a gentle curve.",
+    "timestampSeconds": 317,
+    "timestampStr": "5:17"
+  },
+  {
+    "id": "g7",
+    "term": "ReLU",
+    "definition": "Rectified Linear Unit — a piecewise-linear activation function that outputs 0 for negative inputs and the input value itself for positive inputs.",
+    "timestampSeconds": 324,
+    "timestampStr": "5:24"
+  },
+  {
+    "id": "g8",
+    "term": "Sigmoid",
+    "definition": "An S-shaped activation function that squishes any input into a value between 0 and 1. Common in early neural network tutorials.",
+    "timestampSeconds": 333,
+    "timestampStr": "5:33"
+  },
+  {
+    "id": "g9",
+    "term": "Input Node",
+    "definition": "The node where raw data (e.g., dosage) enters the network. A network can have one or many input nodes.",
+    "timestampSeconds": 391,
+    "timestampStr": "6:31"
+  },
+  {
+    "id": "g10",
+    "term": "Output Node",
+    "definition": "The final node that produces the network's prediction (e.g., predicted effectiveness). A network can have one or many output nodes.",
+    "timestampSeconds": 398,
+    "timestampStr": "6:38"
+  },
+  {
+    "id": "g11",
+    "term": "Hidden Layer",
+    "definition": "Any layer of nodes between the input and output nodes. These layers do the heavy lifting of reshaping activation functions to fit the data.",
+    "timestampSeconds": 430,
+    "timestampStr": "7:10"
+  },
+  {
+    "id": "g12",
+    "term": "Deep Learning",
+    "definition": "Neural networks with many hidden layers, giving them the capacity to learn highly complex, multi-level patterns from data.",
+    "timestampSeconds": 460,
+    "timestampStr": "7:40"
+  },
+  {
+    "id": "g13",
+    "term": "Natural Log",
+    "definition": "Written as log or ln — the logarithm with base e (≈2.718). Used in activation functions like Soft Plus: log(1 + e^x).",
+    "timestampSeconds": 598,
+    "timestampStr": "9:58"
+  },
+  {
+    "id": "g14",
+    "term": "X-axis Coordinate",
+    "definition": "The value fed into an activation function, calculated by multiplying the input by a weight and adding a bias before entering the curved function.",
+    "timestampSeconds": 512,
+    "timestampStr": "8:32"
+  },
+  {
+    "id": "g15",
+    "term": "Weights",
+    "definition": "The parameters that multiply values along connections in a neural network, controlling how much each input influences the output.",
+    "timestampSeconds": 1037,
+    "timestampStr": "17:17"
+  },
+  {
+    "id": "g16",
+    "term": "Biases",
+    "definition": "The parameters that are added (not multiplied) along connections, allowing the network to shift its activation functions left or right.",
+    "timestampSeconds": 1044,
+    "timestampStr": "17:24"
+  },
+  {
+    "id": "g17",
+    "term": "Squiggle",
+    "definition": "Josh Starmer's term for the non-linear curve a neural network fits to data — made by reshaping and adding activation functions together.",
+    "timestampSeconds": 180,
+    "timestampStr": "3:00"
+  },
+  {
+    "id": "g18",
+    "term": "Scaling",
+    "definition": "Multiplying the y-axis values of an activation function output by a weight, which stretches or flips the curve into a new shape.",
+    "timestampSeconds": 706,
+    "timestampStr": "11:46"
+  }
+]

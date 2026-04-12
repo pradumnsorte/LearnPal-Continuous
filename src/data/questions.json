@@ -1,0 +1,262 @@
+[
+  {
+    "id": "q1",
+    "question": "What is the main goal of the StatQuest neural networks series?",
+    "options": [
+      "To prove that neural networks are too complex to understand",
+      "To show how to build neural networks from scratch in Python",
+      "To open the black box and explain neural networks step by step",
+      "To compare neural networks to other machine learning algorithms"
+    ],
+    "correctIndex": 2,
+    "explanation": "The series explicitly aims to 'take a peek into the black box' by breaking down each concept step by step so learners can understand what neural networks actually do.",
+    "timestampSeconds": 51,
+    "timestampStr": "0:51",
+    "difficulty": 1
+  },
+  {
+    "id": "q2",
+    "question": "In the drug dosage example, why can't a straight line be used to make predictions?",
+    "options": [
+      "The dataset is too small",
+      "No straight line can accurately predict all three dosage groups simultaneously",
+      "Straight lines only work for continuous data",
+      "The data has too many outliers"
+    ],
+    "correctIndex": 1,
+    "explanation": "No matter how you rotate a straight line, it can only accurately predict two of the three groups (low=0, medium=1, high=0). A curved squiggle is needed.",
+    "timestampSeconds": 172,
+    "timestampStr": "2:52",
+    "difficulty": 1
+  },
+  {
+    "id": "q3",
+    "question": "What does a neural network fit to the dosage data instead of a straight line?",
+    "options": ["A histogram", "A straight line with a slope", "A squiggle (non-linear curve)", "A bar chart"],
+    "correctIndex": 2,
+    "explanation": "Neural networks fit a squiggle — a non-linear curve — that can be close to 0 for low dosages, 1 for medium, and 0 again for high dosages.",
+    "timestampSeconds": 185,
+    "timestampStr": "3:05",
+    "difficulty": 1
+  },
+  {
+    "id": "q4",
+    "question": "What are the numerical values along the connections in a neural network called?",
+    "options": ["Activation values", "Gradients", "Parameters", "Layers"],
+    "correctIndex": 2,
+    "explanation": "The numbers along each connection are called parameters — they're analogous to the slope and intercept of a line and are estimated during training.",
+    "timestampSeconds": 235,
+    "timestampStr": "3:55",
+    "difficulty": 1
+  },
+  {
+    "id": "q5",
+    "question": "What are the curved or bent lines inside hidden-layer nodes called?",
+    "options": ["Connections", "Activation functions", "Weights", "Bias nodes"],
+    "correctIndex": 1,
+    "explanation": "The curved or bent lines inside nodes are called activation functions. They are the building blocks for fitting a squiggle to data.",
+    "timestampSeconds": 343,
+    "timestampStr": "5:43",
+    "difficulty": 1
+  },
+  {
+    "id": "q6",
+    "question": "Which activation function is used in this StatQuest example?",
+    "options": ["ReLU", "Sigmoid", "Tanh", "Soft Plus"],
+    "correctIndex": 3,
+    "explanation": "This StatQuest uses the Soft Plus activation function, which produces a smooth curve and is computed as log(1 + e^x).",
+    "timestampSeconds": 373,
+    "timestampStr": "6:13",
+    "difficulty": 1
+  },
+  {
+    "id": "q7",
+    "question": "In practice, which activation functions are most commonly used (according to this video)?",
+    "options": [
+      "Sigmoid and Tanh",
+      "ReLU and Soft Plus",
+      "Sigmoid and ReLU",
+      "Soft Plus and Tanh"
+    ],
+    "correctIndex": 1,
+    "explanation": "Despite sigmoid being common in tutorials, in practice ReLU and Soft Plus are much more commonly used in real neural networks.",
+    "timestampSeconds": 363,
+    "timestampStr": "6:03",
+    "difficulty": 2
+  },
+  {
+    "id": "q8",
+    "question": "What are the node layers between the input and output nodes called?",
+    "options": ["Activation layers", "Hidden layers", "Parameter layers", "Connection layers"],
+    "correctIndex": 1,
+    "explanation": "Layers of nodes between input and output are called hidden layers. When building a network, you decide how many hidden layers and nodes per layer to include.",
+    "timestampSeconds": 430,
+    "timestampStr": "7:10",
+    "difficulty": 1
+  },
+  {
+    "id": "q9",
+    "question": "How does a connection between nodes transform the input before it reaches the activation function?",
+    "options": [
+      "It passes it through unchanged",
+      "It squares the input value",
+      "It multiplies by a weight and adds a bias",
+      "It normalizes the input to 0–1"
+    ],
+    "correctIndex": 2,
+    "explanation": "Each connection multiplies the input by a weight and adds a bias (e.g., dosage × –34.4 + 2.14), producing the x-axis coordinate for the activation function.",
+    "timestampSeconds": 512,
+    "timestampStr": "8:32",
+    "difficulty": 1
+  },
+  {
+    "id": "q10",
+    "question": "Why does only a narrow portion (red box) of the activation function get used?",
+    "options": [
+      "The activation function is clipped by the network design",
+      "The input range (0 to 1) maps to only a limited range of x-axis coordinates",
+      "The bias forces the output to a narrow band",
+      "ReLU zeroes out most of the activation function"
+    ],
+    "correctIndex": 1,
+    "explanation": "Because dosages range from 0 to 1, multiplying by the weight and adding the bias maps them to only a narrow range of x-axis coordinates — so only the red-box portion of the activation function is ever used.",
+    "timestampSeconds": 668,
+    "timestampStr": "11:08",
+    "difficulty": 2
+  },
+  {
+    "id": "q11",
+    "question": "What happens when the y-axis values of the blue curve are multiplied by –1.3?",
+    "options": [
+      "The curve shifts left",
+      "The curve is deleted from the network",
+      "The curve is flipped and stretched into a new shape",
+      "The curve becomes the sigmoid function"
+    ],
+    "correctIndex": 2,
+    "explanation": "Multiplying by a negative number flips the curve; multiplying by a magnitude greater than 1 stretches it. Together, –1.3 flips and scales the blue curve into a new shape.",
+    "timestampSeconds": 714,
+    "timestampStr": "11:54",
+    "difficulty": 2
+  },
+  {
+    "id": "q12",
+    "question": "How does the neural network produce the final green squiggle?",
+    "options": [
+      "It picks the highest-value activation function",
+      "It averages the blue and orange curves",
+      "It adds the y-axis values of the blue and orange curves, then shifts by a bias",
+      "It runs backpropagation on the activation functions"
+    ],
+    "correctIndex": 2,
+    "explanation": "The network adds the blue and orange curve values together to get a green squiggle, then subtracts the output bias (–0.58) to shift it so it fits the data.",
+    "timestampSeconds": 906,
+    "timestampStr": "15:06",
+    "difficulty": 2
+  },
+  {
+    "id": "q13",
+    "question": "A dosage of 0.5 is plugged into the trained network and the output is 1.03. What does the network predict?",
+    "options": [
+      "The dosage is not effective, because 1.03 > 1",
+      "The dosage is effective, because 1.03 is closer to 1 than to 0",
+      "The dosage is inconclusive",
+      "The dosage is dangerous, because the output exceeds 1"
+    ],
+    "correctIndex": 1,
+    "explanation": "An output of 1.03 is closer to 1 (effective) than to 0 (not effective), so the network predicts the dosage will be effective.",
+    "timestampSeconds": 980,
+    "timestampStr": "16:19",
+    "difficulty": 2
+  },
+  {
+    "id": "q14",
+    "question": "Why were early researchers inspired to call these systems 'neural networks'?",
+    "options": [
+      "They were built to simulate human intelligence exactly",
+      "Nodes resembled neurons and connections resembled synapses",
+      "The networks were wired into actual brain tissue",
+      "They were invented by neuroscientists"
+    ],
+    "correctIndex": 1,
+    "explanation": "Back in the 1940s–50s, researchers thought the nodes were vaguely like neurons and the connections resembled synapses — hence the name 'neural network'.",
+    "timestampSeconds": 1017,
+    "timestampStr": "16:57",
+    "difficulty": 1
+  },
+  {
+    "id": "q15",
+    "question": "What is the difference between weights and biases in a neural network?",
+    "options": [
+      "Weights are in the output layer; biases are in the hidden layer",
+      "Weights are added to inputs; biases multiply inputs",
+      "Weights multiply values along connections; biases are added values",
+      "There is no difference — they are interchangeable"
+    ],
+    "correctIndex": 2,
+    "explanation": "Weights are the parameters that multiply values (controlling scaling and flipping), while biases are the parameters that are added (controlling shifts). Both are estimated during training.",
+    "timestampSeconds": 1044,
+    "timestampStr": "17:24",
+    "difficulty": 1
+  },
+  {
+    "id": "q16",
+    "question": "If a network has two nodes in one hidden layer and you add more hidden layers and nodes, what becomes possible?",
+    "options": [
+      "The network can only handle classification problems",
+      "The network can fit more complex squiggles to more complicated datasets",
+      "The network requires less training data",
+      "The activation functions change automatically"
+    ],
+    "correctIndex": 1,
+    "explanation": "More hidden layers and nodes give the network more shapes to combine, allowing it to fit increasingly complex squiggles — enabling deep learning to handle nearly any dataset.",
+    "timestampSeconds": 1071,
+    "timestampStr": "17:51",
+    "difficulty": 2
+  },
+  {
+    "id": "q17",
+    "question": "Two nodes in one hidden layer produce curves that are added together. If you wanted the network to fit a dataset with 5 distinct 'humps', what would most likely help?",
+    "options": [
+      "Using only a sigmoid activation function",
+      "Adding more nodes to the hidden layer to produce more shaped curves",
+      "Reducing the number of parameters",
+      "Using only one hidden layer with one node"
+    ],
+    "correctIndex": 1,
+    "explanation": "Each node contributes one shaped curve to the final squiggle. More humps in the data generally require more nodes (more shaped curves) so their sum can match the complexity.",
+    "timestampSeconds": 1079,
+    "timestampStr": "18:00",
+    "difficulty": 3
+  },
+  {
+    "id": "q18",
+    "question": "The video says parameters are 'analogous to slope and intercept in a straight line.' In what specific way do weights and biases map to slope and intercept?",
+    "options": [
+      "Bias = slope (scales the curve); weight = intercept (shifts it)",
+      "Weight = slope (scales/flips the activation output); bias = intercept (shifts the activation input or output)",
+      "Both weights and biases act as slopes simultaneously",
+      "Weights control the number of layers; biases control activation functions"
+    ],
+    "correctIndex": 1,
+    "explanation": "Weights multiply (scale or flip) values — like a slope — while biases are added values that shift the input to the activation function or the final output, just like an intercept shifts a line up or down.",
+    "timestampSeconds": 244,
+    "timestampStr": "4:04",
+    "difficulty": 3
+  },
+  {
+    "id": "q19",
+    "question": "Why does using a different activation function (e.g., ReLU vs Soft Plus) not fundamentally change how a neural network works?",
+    "options": [
+      "Because all activation functions produce the same output values",
+      "Because the network structure disappears when switching functions",
+      "Because any bent or curved function can be reshaped by weights and biases and added together to fit data",
+      "Because activation functions only affect the output layer"
+    ],
+    "correctIndex": 2,
+    "explanation": "The core principle holds regardless of which activation function you choose: weights and biases reshape any bent or curved function into new shapes, and summing those shapes produces a squiggle that fits the data.",
+    "timestampSeconds": 1050,
+    "timestampStr": "17:30",
+    "difficulty": 3
+  }
+]

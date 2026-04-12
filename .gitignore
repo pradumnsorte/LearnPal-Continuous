@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+server/learnpal.db
+server/learnpal.db-shm
+server/learnpal.db-wal
+.claude/

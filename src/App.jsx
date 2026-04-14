@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import './App.css'
 import transcriptRows from './data/transcript.json'
 import glossaryData from './data/glossary.json'
@@ -190,7 +190,7 @@ const generateQuizQuestion = async (provider, currentSeconds, previousQuestions 
 
 // ─── Glossary ─────────────────────────────────────────────────────────────────
 
-function Glossary({ currentSeconds }) {
+function Glossary({ currentSeconds, aiProvider, onCycleProvider }) {
   const [isPaused, setIsPaused] = useState(false)
   const [frozenAt, setFrozenAt] = useState(null)
   const [removedIds, setRemovedIds] = useState(new Set())
@@ -233,6 +233,14 @@ function Glossary({ currentSeconds }) {
     <section className="lp-glossary">
       <div className="lp-glossary-topbar">
         <h2>Pal&apos;s Key Word Glossary</h2>
+        <button
+          type="button"
+          className="lp-provider-toggle"
+          onClick={onCycleProvider}
+          title="Switch AI provider"
+        >
+          {PROVIDER_LABELS[aiProvider]}
+        </button>
       </div>
       <div className="lp-glossary-content">
         <div className="lp-section-controls">
@@ -305,16 +313,25 @@ function Highlights({ currentSeconds, onSeek, onDetailClick }) {
   return (
     <section className="lp-highlights">
       <div className="lp-section-header-row">
-        <h2>Explore highlights</h2>
+        <div className="lp-section-heading-group">
+          <h2>Explore highlights</h2>
+          <div className="lp-info-tip">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.8"/>
+              <line x1="12" y1="8" x2="12" y2="8.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+              <line x1="12" y1="11" x2="12" y2="16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+            </svg>
+            <div className="lp-tip-bubble" role="tooltip">
+              {isPaused
+                ? 'Highlights paused — other modules continue running.'
+                : 'Parts of the video are highlighted as this lesson progresses.'}
+            </div>
+          </div>
+        </div>
         <button type="button" className="lp-section-stop" onClick={togglePause}>
           {isPaused ? 'Resume' : 'Hide'}
         </button>
       </div>
-      <p className="lp-info-strip">
-        {isPaused
-          ? 'Highlights paused — other modules continue running.'
-          : 'Parts of the video are highlighted as this lesson progresses.'}
-      </p>
       {visible.length === 0 ? (
         <p className="lp-placeholder">Highlights will appear as the video progresses.</p>
       ) : (
@@ -425,16 +442,25 @@ function LiveQuestionFeed({ currentSeconds, onAnswered, onExplainAnswer, quizDif
   return (
     <section className="lp-question-feed">
       <div className="lp-section-header-row">
-        <h2>Live question feed</h2>
+        <div className="lp-section-heading-group">
+          <h2>Live question feed</h2>
+          <div className="lp-info-tip">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.8"/>
+              <line x1="12" y1="8" x2="12" y2="8.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+              <line x1="12" y1="11" x2="12" y2="16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+            </svg>
+            <div className="lp-tip-bubble" role="tooltip">
+              {isPaused
+                ? 'Question feed paused — other modules continue running.'
+                : 'Questions update as the lesson progresses. Answer on the go for better comprehension.'}
+            </div>
+          </div>
+        </div>
         <button type="button" className="lp-section-stop" onClick={togglePause}>
           {isPaused ? 'Resume' : 'Stop'}
         </button>
       </div>
-      <p className="lp-info-strip">
-        {isPaused
-          ? 'Question feed paused — other modules continue running.'
-          : 'Questions update as the lesson progresses. Answer on the go for better comprehension.'}
-      </p>
       {displayed.length === 0 ? (
         <p className="lp-placeholder">Questions will appear as you watch.</p>
       ) : (
@@ -534,6 +560,21 @@ export default function App() {
   const isPlayingRef    = useRef(false)
   const logEventRef     = useRef(null)
   const firstInteractionLoggedRef = useRef(false)
+  const playerStageRef  = useRef(null)
+  const isCompactRef    = useRef(false)
+  const controlsTimerRef = useRef(null)
+  const progressRef     = useRef(null)
+  const isSeekingRef    = useRef(false)
+  const centerColumnRef = useRef(null)
+  const playerControlsModeRef = useRef('custom')
+  const savedTimeRef    = useRef(0)
+
+  // Settings refs
+  const gearBtnRef      = useRef(null)
+  const settingsPanelRef = useRef(null)
+
+  // Secondary row ref — used to dynamically sync --feature-row-h
+  const secondaryRowRef = useRef(null)
 
   // Transcript refs
   const transcriptListRef  = useRef(null)
@@ -544,11 +585,30 @@ export default function App() {
   // Chat scroll ref
   const chatBottomRef = useRef(null)
 
+  // Right column resize
+  const rightColRef          = useRef(null)
+  const dividerDraggingRef   = useRef(false)
+  const dividerStartY        = useRef(0)
+  const dividerStartHeight   = useRef(0)
+  const [glossaryHeight, setGlossaryHeight] = useState(null) // null = equal flex split
+
   // Playback state
   const [isPlaying, setIsPlaying]           = useState(false)
   const [duration, setDuration]             = useState(0)
   const [currentPlaybackSeconds, setCurrentPlaybackSeconds] = useState(0)
   const [activeTranscriptId, setActiveTranscriptId]         = useState(transcriptRows[0]?.id ?? '')
+
+  // Custom controls state
+  const [volume, setVolume]               = useState(100)
+  const [isMuted, setIsMuted]             = useState(false)
+  const [playbackRate, setPlaybackRate]   = useState(1)
+  const [showControls, setShowControls]   = useState(true)
+  const [isFullscreen, setIsFullscreen]   = useState(false)
+  const [showSpeedMenu, setShowSpeedMenu] = useState(false)
+  const [isCompact, setIsCompact]         = useState(false)
+  const [playerControlsMode, setPlayerControlsMode] = useState('custom') // 'custom' | 'native'
+  const [showSettings, setShowSettings]   = useState(false)
+  const [playerKey, setPlayerKey]         = useState(0)
 
   // AI / session state
   const [aiProvider, setAiProvider] = useState(PROVIDERS.GROQ)
@@ -621,62 +681,105 @@ export default function App() {
   useEffect(() => {
     let disposed = false
 
+    const startPlaybackPolling = () => {
+      window.clearInterval(playbackPollRef.current)
+      playbackPollRef.current = window.setInterval(() => {
+        const player = playerRef.current
+        if (!player || typeof player.getCurrentTime !== 'function') return
+        const current = player.getCurrentTime()
+        if (Number.isFinite(current)) setCurrentPlaybackSeconds(current)
+      }, 500)
+    }
+
     const initPlayer = async () => {
       await loadYouTubeIframeApi()
-      if (disposed || !playerHostRef.current) return
+      if (disposed || !playerHostRef.current || !window.YT?.Player) return
 
       playerRef.current = new window.YT.Player(playerHostRef.current, {
+        host: 'https://www.youtube-nocookie.com',
         videoId: VIDEO_ID,
-        playerVars: { controls: 1, rel: 0, modestbranding: 1 },
+        playerVars: {
+          controls: playerControlsModeRef.current === 'native' ? 1 : 0,
+          rel: 0, modestbranding: 1, iv_load_policy: 3, playsinline: 1, autoplay: 0,
+        },
         events: {
           onReady: (e) => {
+            startPlaybackPolling()
             const d = e.target.getDuration()
             if (d > 0) setDuration(d)
+            setVolume(e.target.getVolume())
+            setIsMuted(e.target.isMuted())
+            if (savedTimeRef.current > 0) {
+              e.target.seekTo(savedTimeRef.current, true)
+              savedTimeRef.current = 0
+            }
           },
           onStateChange: (e) => {
             const playing = e.data === 1
             const ended   = e.data === 0
             isPlayingRef.current = playing
             setIsPlaying(playing)
+            const d = e.target.getDuration()
+            if (d > 0) setDuration(d)
             const pos = e.target.getCurrentTime?.() ?? null
             if (playing) logEventRef.current?.('video_play', pos)
             else if (ended) logEventRef.current?.('video_ended', pos)
             else logEventRef.current?.('video_pause', pos)
+            if (playerControlsModeRef.current === 'custom') {
+              if (playing) {
+                clearTimeout(controlsTimerRef.current)
+                controlsTimerRef.current = setTimeout(() => setShowControls(false), 3000)
+              } else {
+                clearTimeout(controlsTimerRef.current)
+                setShowControls(true)
+              }
+            }
           },
         },
       })
-
-      playbackPollRef.current = window.setInterval(() => {
-        const player = playerRef.current
-        if (!player || typeof player.getCurrentTime !== 'function') return
-        const t = player.getCurrentTime()
-        setCurrentPlaybackSeconds(t)
-      }, 500)
     }
 
     initPlayer()
     return () => {
       disposed = true
       window.clearInterval(playbackPollRef.current)
-      playerRef.current?.destroy?.()
+      clearTimeout(controlsTimerRef.current)
+      if (playerRef.current && typeof playerRef.current.destroy === 'function') {
+        playerRef.current.destroy()
+      }
       playerRef.current = null
     }
-  }, [])
+  }, [playerKey])
 
   // ── Transcript auto-scroll ─────────────────────────────────────────────────
 
+  // Effect 1: track which line is active (fires every poll tick)
+  useEffect(() => {
+    if (!transcriptRows.length) return
+    let currentId = transcriptRows[0].id
+    for (let i = 0; i < transcriptRows.length; i += 1) {
+      if (currentPlaybackSeconds >= transcriptRows[i].seconds) {
+        currentId = transcriptRows[i].id
+      } else {
+        break
+      }
+    }
+    setActiveTranscriptId(currentId)
+  }, [currentPlaybackSeconds])
+
+  // Effect 2: scroll the list to the active line (fires only when active line changes)
+  // Uses list.scrollTo() — NOT scrollIntoView() — so only the transcript list scrolls,
+  // never the center column.
   useEffect(() => {
     if (userScrolledRef.current) return
-    const active = transcriptRows
-      .filter((r) => r.seconds <= currentPlaybackSeconds)
-      .at(-1)
-    if (!active) return
-    setActiveTranscriptId(active.id)
-    const el = transcriptItemRefs.current.get(active.id)
-    if (el && transcriptListRef.current) {
-      el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-    }
-  }, [currentPlaybackSeconds])
+    const list = transcriptListRef.current
+    const activeNode = transcriptItemRefs.current.get(activeTranscriptId)
+    if (!list || !activeNode) return
+    const listRect = list.getBoundingClientRect()
+    const activeRect = activeNode.getBoundingClientRect()
+    const target = list.scrollTop + (activeRect.top - listRect.top) - 8
+    list.scrollTo({ top: Math.max(target, 0), behavior: 'smooth' })
+  }, [activeTranscriptId])
 
   const setTranscriptItemRef = (id, node) => {
     if (node) transcriptItemRefs.current.set(id, node)
@@ -686,7 +789,8 @@ export default function App() {
   // ── Chat auto-scroll ───────────────────────────────────────────────────────
 
   useEffect(() => {
-    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const el = chatBottomRef.current
+    if (el) el.scrollTop = el.scrollHeight
   }, [messages])
 
   // ── Chat ───────────────────────────────────────────────────────────────────
@@ -866,11 +970,184 @@ export default function App() {
       .catch(() => {})
   }
 
-  const progressPct = duration > 0
-    ? Math.min(100, (currentPlaybackSeconds / duration) * 100)
-    : 0
-  const currentTimeStr = formatTime(currentPlaybackSeconds)
-  const durationStr = formatTime(duration)
+  const seekPercent = duration > 0 ? (currentPlaybackSeconds / duration) * 100 : 0
+
+  // ── Fullscreen sync ───────────────────────────────────────────────────────
+
+  useEffect(() => {
+    const onFsChange = () => setIsFullscreen(!!document.fullscreenElement)
+    document.addEventListener('fullscreenchange', onFsChange)
+    return () => document.removeEventListener('fullscreenchange', onFsChange)
+  }, [])
+
+  // ── Sticky shrinking player ───────────────────────────────────────────────
+
+  const handleMainScroll = useCallback(() => {
+    const el = centerColumnRef.current
+    if (!el) return
+    if (!isCompactRef.current && el.scrollTop > 1) {
+      isCompactRef.current = true
+      setIsCompact(true)
+    } else if (isCompactRef.current && el.scrollTop < 1) {
+      isCompactRef.current = false
+      setIsCompact(false)
+    }
+  }, [])
+
+  const handleTranscriptScroll = useCallback(() => {
+    userScrolledRef.current = true
+    clearTimeout(userScrollTimerRef.current)
+    userScrollTimerRef.current = setTimeout(() => {
+      userScrolledRef.current = false
+    }, 4000)
+  }, [])
+
+  // ── Sync --feature-row-h to the actual secondary row height ──────────────
+
+  useLayoutEffect(() => {
+    const el = secondaryRowRef.current
+    if (!el) return
+    const sync = () => {
+      document.documentElement.style.setProperty(
+        '--feature-row-h',
+        `${el.offsetHeight}px`
+      )
+    }
+    sync() // immediate measurement on mount
+    const observer = new ResizeObserver(sync)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
+  // ── Settings panel ────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!showSettings) return
+    const close = (e) => {
+      if (settingsPanelRef.current?.contains(e.target)) return
+      if (gearBtnRef.current?.contains(e.target)) return
+      setShowSettings(false)
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [showSettings])
+
+  const switchPlayerControls = (next) => {
+    if (next === playerControlsMode) { setShowSettings(false); return }
+    savedTimeRef.current = playerRef.current?.getCurrentTime?.() ?? 0
+    playerControlsModeRef.current = next
+    setPlayerControlsMode(next)
+    setShowControls(true)
+    setShowSettings(false)
+    setPlayerKey((k) => k + 1)
+  }
+
+  // ── Custom player controls ────────────────────────────────────────────────
+
+  const handleStageMouseMove = () => {
+    setShowControls(true)
+    clearTimeout(controlsTimerRef.current)
+    if (isPlayingRef.current) {
+      controlsTimerRef.current = setTimeout(() => setShowControls(false), 3000)
+    }
+  }
+
+  const handleStageMouseLeave = () => {
+    clearTimeout(controlsTimerRef.current)
+    if (isPlayingRef.current) setShowControls(false)
+  }
+
+  const togglePlay = () => {
+    const p = playerRef.current
+    if (!p) return
+    isPlayingRef.current ? p.pauseVideo() : p.playVideo()
+  }
+
+  const seekRelative = (delta) => {
+    const p = playerRef.current
+    if (!p) return
+    const t = Math.max(0, (p.getCurrentTime() || 0) + delta)
+    p.seekTo(t, true)
+    setCurrentPlaybackSeconds(t)
+  }
+
+  const seekToRatio = (clientX) => {
+    const rect = progressRef.current?.getBoundingClientRect()
+    if (!rect || !duration) return
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+    const t = ratio * duration
+    setCurrentPlaybackSeconds(t)
+    playerRef.current?.seekTo(t, true)
+  }
+
+  const handleSeekPointerDown = (e) => {
+    e.currentTarget.setPointerCapture(e.pointerId)
+    isSeekingRef.current = true
+    seekToRatio(e.clientX)
+  }
+
+  const handleSeekPointerMove = (e) => {
+    if (!isSeekingRef.current) return
+    seekToRatio(e.clientX)
+  }
+
+  const handleSeekPointerUp = () => { isSeekingRef.current = false }
+
+  const handleVolumeChange = (val) => {
+    const p = playerRef.current
+    if (!p) return
+    setVolume(val)
+    p.setVolume(val)
+    if (val === 0) { p.mute(); setIsMuted(true) }
+    else if (isMuted) { p.unMute(); setIsMuted(false) }
+  }
+
+  const toggleMute = () => {
+    const p = playerRef.current
+    if (!p) return
+    if (isMuted) {
+      p.unMute()
+      setIsMuted(false)
+      if (volume === 0) { setVolume(50); p.setVolume(50) }
+    } else {
+      p.mute()
+      setIsMuted(true)
+    }
+  }
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      playerStageRef.current?.requestFullscreen()
+    } else {
+      document.exitFullscreen()
+    }
+  }
+
+  // ── Right column glossary/chat resize ─────────────────────────────────────
+
+  const handleDividerPointerDown = (e) => {
+    e.preventDefault()
+    e.currentTarget.setPointerCapture(e.pointerId)
+    dividerDraggingRef.current = true
+    dividerStartY.current = e.clientY
+    // Snapshot the current glossary height (use offsetHeight of the wrapper)
+    const glossaryEl = rightColRef.current?.querySelector('.lp-glossary-resize-wrapper')
+    dividerStartHeight.current = glossaryEl?.offsetHeight ?? Math.floor((rightColRef.current?.offsetHeight ?? 600) / 2)
+  }
+
+  const handleDividerPointerMove = (e) => {
+    if (!dividerDraggingRef.current) return
+    const colH = rightColRef.current?.offsetHeight ?? 600
+    const delta = e.clientY - dividerStartY.current
+    const next = dividerStartHeight.current + delta
+    const min = 80
+    const max = colH - 150
+    setGlossaryHeight(Math.max(min, Math.min(max, next)))
+  }
+
+  const handleDividerPointerUp = () => {
+    dividerDraggingRef.current = false
+  }
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -880,93 +1157,227 @@ export default function App() {
       {/* Header */}
       <header className="lp-header">
         <div className="lp-brand">
-          <img src={brandIcon} alt="LearnPal" className="lp-brand-icon" />
-          <span className="lp-brand-name">
-            <span className="lp-brand-learn">Learn</span>
-            <span className="lp-brand-pal">Pal</span>
-          </span>
+          <img src={brandIcon} alt="LearnPal logo" />
+          <h1>
+            <span>Learn</span>Pal
+          </h1>
         </div>
-        <button
-          type="button"
-          className="lp-provider-toggle"
-          onClick={() =>
-            setAiProvider((p) => {
-              const idx = PROVIDER_CYCLE.indexOf(p)
-              return PROVIDER_CYCLE[(idx + 1) % PROVIDER_CYCLE.length]
-            })
-          }
-        >
-          {PROVIDER_LABELS[aiProvider]}
-        </button>
       </header>
 
       {/* Main layout */}
       <main className="lp-main">
         <aside className="lp-utility-rail" aria-label="Primary navigation">
           <button type="button" className="lp-rail-btn" aria-label="Menu">
-            <span className="lp-icon lp-icon-menu" aria-hidden="true" />
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M3 12h18M3 6h18M3 18h18" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+            </svg>
           </button>
           <div className="lp-rail-bottom">
-            <button type="button" className="lp-rail-btn" aria-label="Settings">
-              <span className="lp-icon lp-icon-gear" aria-hidden="true" />
-            </button>
-            <button type="button" className="lp-rail-avatar" aria-label="Profile">
-              <span className="lp-icon lp-icon-user" aria-hidden="true" />
-            </button>
+            <div className="lp-settings-anchor">
+              <button
+                ref={gearBtnRef}
+                type="button"
+                className={`lp-rail-btn${showSettings ? ' lp-rail-btn-active' : ''}`}
+                aria-label="Settings"
+                aria-expanded={showSettings}
+                onClick={() => setShowSettings((v) => !v)}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+
+              {showSettings && (
+                <div ref={settingsPanelRef} className="lp-settings-panel" role="dialog" aria-label="Settings">
+                  <p className="lp-settings-label">Player controls</p>
+                  <div className="lp-settings-seg">
+                    <button
+                      type="button"
+                      className={`lp-seg-opt${playerControlsMode === 'custom' ? ' lp-seg-active' : ''}`}
+                      onClick={() => switchPlayerControls('custom')}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="M8 5v14l11-7z"/>
+                      </svg>
+                      Custom
+                    </button>
+                    <button
+                      type="button"
+                      className={`lp-seg-opt${playerControlsMode === 'native' ? ' lp-seg-active' : ''}`}
+                      onClick={() => switchPlayerControls('native')}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <rect x="2" y="4" width="20" height="16" rx="2" stroke="currentColor" strokeWidth="1.8"/>
+                        <path d="M8 10l2.5 2.5L8 15M12 15h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                      YouTube
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="lp-rail-avatar" aria-label="User profile">
+              P
+            </div>
           </div>
         </aside>
 
         <div className="lp-workspace">
 
           {/* ── Center column: Video + [Highlights | Questions] + Transcripts ── */}
-          <div className="lp-center-col">
-            <section className="lp-video-panel">
-              <div className="lp-video-topbar">
-                <h2 className="lp-video-panel-title">The Essential Main Ideas of Neural Networks</h2>
-              </div>
-              <div className="lp-video-frame">
-                <div ref={playerHostRef} className="lp-player" />
-              </div>
-              <div className="lp-video-controls">
-                <div className="lp-progress-track">
-                  <span className="lp-progress-fill" style={{ width: `${progressPct}%` }} />
-                </div>
-                <div className="lp-video-controls-row">
-                  <div className="lp-control-group">
-                    <button type="button" className="lp-control-btn" aria-label="Play">
-                      <span className="lp-icon lp-icon-play" aria-hidden="true" />
-                    </button>
-                    <button type="button" className="lp-control-btn" aria-label="Volume">
-                      <span className="lp-icon lp-icon-volume" aria-hidden="true" />
-                    </button>
-                    <button type="button" className="lp-control-btn" aria-label="Rewind">
-                      <span className="lp-icon lp-icon-back" aria-hidden="true" />
-                    </button>
-                    <button type="button" className="lp-control-btn" aria-label="Forward">
-                      <span className="lp-icon lp-icon-forward" aria-hidden="true" />
-                    </button>
-                    <span className="lp-video-time">{currentTimeStr} / {durationStr}</span>
+          <div className="lp-center-col" ref={centerColumnRef} onScroll={handleMainScroll}>
+            {/* Video player */}
+            <div className={`lp-player-wrap${isCompact ? ' lp-player-compact' : ''}`}>
+              <div
+                ref={playerStageRef}
+                className={`lp-player-stage${playerControlsMode === 'custom' && !showControls ? ' lp-player-nocursor' : ''}`}
+                onMouseMove={handleStageMouseMove}
+                onMouseLeave={handleStageMouseLeave}
+              >
+                <div ref={playerHostRef} className="lp-youtube-player" />
+
+                {/* Transparent overlay — routes clicks to togglePlay, custom mode only */}
+                {playerControlsMode === 'custom' && (
+                  <div className="lp-player-click-capture" onClick={togglePlay} aria-hidden="true" />
+                )}
+
+                {/* Custom controls overlay — hidden in YouTube mode */}
+                {playerControlsMode === 'custom' && <div className={`lp-controls${showControls ? ' lp-controls-visible' : ''}`}>
+
+                  {/* Seek bar */}
+                  <div
+                    className="lp-seek-bar"
+                    ref={progressRef}
+                    onPointerDown={handleSeekPointerDown}
+                    onPointerMove={handleSeekPointerMove}
+                    onPointerUp={handleSeekPointerUp}
+                  >
+                    <div className="lp-seek-track">
+                      <div className="lp-seek-fill" style={{ width: `${seekPercent}%` }} />
+                      <div className="lp-seek-thumb" style={{ left: `${seekPercent}%` }} />
+                    </div>
                   </div>
-                  <div className="lp-control-group">
-                    <button type="button" className="lp-control-btn" aria-label="Captions">
-                      <span className="lp-icon lp-icon-cc" aria-hidden="true" />
-                    </button>
-                    <button type="button" className="lp-control-btn" aria-label="Speed">
-                      <span className="lp-icon lp-icon-speed" aria-hidden="true" />
-                    </button>
-                    <button type="button" className="lp-control-btn" aria-label="Settings">
-                      <span className="lp-icon lp-icon-gear" aria-hidden="true" />
-                    </button>
-                    <button type="button" className="lp-control-btn" aria-label="Fullscreen">
-                      <span className="lp-icon lp-icon-fullscreen" aria-hidden="true" />
-                    </button>
+
+                  {/* Controls row */}
+                  <div className="lp-controls-row">
+                    <div className="lp-ctrl-left">
+
+                      {/* Play / Pause */}
+                      <button type="button" className="lp-ctrl-btn" onClick={togglePlay} aria-label={isPlaying ? 'Pause' : 'Play'}>
+                        {isPlaying ? (
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                            <rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" />
+                          </svg>
+                        ) : (
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                            <path d="M5 3l14 9-14 9V3z" />
+                          </svg>
+                        )}
+                      </button>
+
+                      {/* Rewind 10s */}
+                      <button type="button" className="lp-ctrl-btn" onClick={() => seekRelative(-10)} aria-label="Rewind 10 seconds">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                          <path d="M11.99 5V1l-5 5 5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6h-2c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z" />
+                          <text x="12" y="17" textAnchor="middle" fontSize="6" fontWeight="bold" fill="currentColor">10</text>
+                        </svg>
+                      </button>
+
+                      {/* Forward 10s */}
+                      <button type="button" className="lp-ctrl-btn" onClick={() => seekRelative(10)} aria-label="Forward 10 seconds">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                          <path d="M12.01 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z" />
+                          <text x="12" y="17" textAnchor="middle" fontSize="6" fontWeight="bold" fill="currentColor">10</text>
+                        </svg>
+                      </button>
+
+                      {/* Volume */}
+                      <div className="lp-vol-group">
+                        <button type="button" className="lp-ctrl-btn" onClick={toggleMute} aria-label={isMuted ? 'Unmute' : 'Mute'}>
+                          {(isMuted || volume === 0) ? (
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                              <path d="M16.5 12A4.5 4.5 0 0 0 14 7.97v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.796 8.796 0 0 0 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06A8.99 8.99 0 0 0 17.73 18l1.73 1.73L21 18.46 5.73 3H4.27zM12 4L9.91 6.09 12 8.18V4z" />
+                            </svg>
+                          ) : volume < 50 ? (
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                              <path d="M18.5 12A4.5 4.5 0 0 0 16 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM5 9v6h4l5 5V4L9 9H5z" />
+                            </svg>
+                          ) : (
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                              <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
+                            </svg>
+                          )}
+                        </button>
+                        <div className="lp-vol-track">
+                          <input
+                            type="range" min="0" max="100"
+                            value={isMuted ? 0 : volume}
+                            onChange={(e) => handleVolumeChange(Number(e.target.value))}
+                            className="lp-vol-slider"
+                            aria-label="Volume"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Time display */}
+                      <span className="lp-ctrl-time">{formatTime(currentPlaybackSeconds)} / {formatTime(duration)}</span>
+                    </div>
+
+                    <div className="lp-ctrl-right">
+
+                      {/* Playback speed */}
+                      <div className="lp-speed-group">
+                        <button
+                          type="button"
+                          className="lp-ctrl-btn lp-speed-btn"
+                          onClick={(e) => { e.stopPropagation(); setShowSpeedMenu((v) => !v) }}
+                          aria-label="Playback speed"
+                        >
+                          {playbackRate === 1 ? '1×' : `${playbackRate}×`}
+                        </button>
+                        {showSpeedMenu && (
+                          <div className="lp-speed-menu">
+                            {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map((r) => (
+                              <button
+                                key={r}
+                                type="button"
+                                className={`lp-speed-opt${playbackRate === r ? ' lp-speed-current' : ''}`}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  playerRef.current?.setPlaybackRate(r)
+                                  setPlaybackRate(r)
+                                  setShowSpeedMenu(false)
+                                }}
+                              >
+                                {r === 1 ? 'Normal' : `${r}×`}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Fullscreen */}
+                      <button type="button" className="lp-ctrl-btn" onClick={toggleFullscreen} aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}>
+                        {isFullscreen ? (
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                            <path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z" />
+                          </svg>
+                        ) : (
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                            <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
                   </div>
-                </div>
+                </div>}
               </div>
-            </section>
+            </div>
 
             {/* Highlights + Question Feed side by side below video */}
-            <div className="lp-secondary-row">
+            <div className="lp-secondary-row" ref={secondaryRowRef}>
               <Highlights
                 currentSeconds={currentPlaybackSeconds}
                 onSeek={(t) => {
@@ -995,13 +1406,7 @@ export default function App() {
               <ul
                 className="lp-transcript-list"
                 ref={transcriptListRef}
-                onMouseEnter={() => { userScrolledRef.current = true }}
-                onMouseLeave={() => {
-                  clearTimeout(userScrollTimerRef.current)
-                  userScrollTimerRef.current = setTimeout(() => {
-                    userScrolledRef.current = false
-                  }, 4000)
-                }}
+                onScroll={handleTranscriptScroll}
               >
                 {transcriptRows.map((row) => (
                   <li
@@ -1023,79 +1428,121 @@ export default function App() {
           </div>
 
           {/* ── Right column: Glossary + Chat ── */}
-          <aside className="lp-right-col">
-            <Glossary currentSeconds={currentPlaybackSeconds} />
-            <div className="lp-right-divider" />
+          <aside className="lp-right-col" ref={rightColRef}>
+            <div
+              className="lp-glossary-resize-wrapper"
+              style={glossaryHeight !== null
+                ? { height: `${glossaryHeight}px`, flexShrink: 0 }
+                : { flex: 1, minHeight: 0 }}
+            >
+              <Glossary
+                currentSeconds={currentPlaybackSeconds}
+                aiProvider={aiProvider}
+                onCycleProvider={() =>
+                  setAiProvider((p) => {
+                    const idx = PROVIDER_CYCLE.indexOf(p)
+                    return PROVIDER_CYCLE[(idx + 1) % PROVIDER_CYCLE.length]
+                  })
+                }
+              />
+            </div>
+
+            {/* Draggable divider */}
+            <div
+              className="lp-right-divider"
+              onPointerDown={handleDividerPointerDown}
+              onPointerMove={handleDividerPointerMove}
+              onPointerUp={handleDividerPointerUp}
+              role="separator"
+              aria-label="Resize glossary and chat"
+            />
 
             <section className="lp-chat">
-              <div className="lp-chat-messages">
+              <div className="lp-chat-hero" ref={chatBottomRef}>
                 {messages.length === 0 && !isLoading ? (
-                  <div className="lp-greeting-wrap">
-                    <img src={palCharacter} alt="Pal" />
-                    <div className="lp-greeting-bubbles">
-                      <p className="lp-greet-light">Hi there,</p>
-                      <p className="lp-greet-strong">How can I help you?</p>
+                  <div className="lp-chat-start">
+                    <div className="lp-greeting-wrap">
+                      <img src={palCharacter} alt="Pal mascot" />
+                      <div className="lp-greeting-bubbles">
+                        <p className="lp-greet-light">Hi there,</p>
+                        <p className="lp-greet-strong">How can I help you?</p>
+                      </div>
+                    </div>
+
+                    <div className="lp-suggestions-inline">
+                      <p className="lp-suggestions-label">Try asking</p>
+                      <div className="lp-suggestions-grid">
+                        {QUICK_SUGGESTIONS.map((s) => (
+                          <button
+                            key={s}
+                            type="button"
+                            className="lp-suggestion-card"
+                            onClick={() => submitQuickSuggestion(s)}
+                            disabled={isLoading}
+                          >
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true" className="lp-suggestion-arrow">
+                              <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                            </svg>
+                            {s}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 ) : (
-                  <div className="lp-message-list">
-                    {messages.map((msg, i) => (
-                      <div key={i} className={`lp-message lp-message-${msg.role}`}>
-                        {msg.content}
-                      </div>
-                    ))}
+                  <div className="lp-snap-chat-flow">
+                    {messages.map((msg, i) =>
+                      msg.role === 'user' ? (
+                        <div key={i} className="lp-flow-user-end">
+                          <div className="lp-flow-chip">{msg.content}</div>
+                        </div>
+                      ) : (
+                        <div key={i} className="lp-flow-assistant">
+                          <p>{msg.content}</p>
+                        </div>
+                      )
+                    )}
                     {isLoading && (
-                      <div className="lp-message lp-message-assistant">
+                      <div className="lp-flow-assistant">
                         <div className="lp-typing-indicator"><span /><span /><span /></div>
+                      </div>
+                    )}
+                    {aiError && (
+                      <div className="lp-flow-assistant">
+                        <p className="lp-error-msg">⚠ {aiError}</p>
                       </div>
                     )}
                   </div>
                 )}
-                {aiError && <p className="lp-error-msg">! {aiError}</p>}
-                <div ref={chatBottomRef} />
               </div>
 
-              <div className="lp-chat-input-row">
-                <div className="lp-chat-input-wrap">
-                  <input
-                    type="text"
-                    className="lp-chat-input"
-                    placeholder="Ask me anything..."
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') sendMessage(chatInput) }}
-                  />
-                  <button
-                    type="button"
-                    className="lp-send-btn"
-                    onClick={() => sendMessage(chatInput)}
-                    disabled={isLoading || !chatInput.trim()}
-                    aria-label="Send message"
+              <section className="lp-chat-bottom">
+                <div className="lp-input-row">
+                  <form
+                    className="lp-input-main"
+                    onSubmit={(e) => { e.preventDefault(); sendMessage(chatInput) }}
                   >
-                    &gt;
-                  </button>
-                </div>
-                <button type="button" className="lp-mic-btn" aria-label="Microphone">
-                  <span className="lp-icon lp-icon-mic" aria-hidden="true" />
-                </button>
-              </div>
-              <div className="lp-quick-suggestions">
-                <p>Quick suggestions</p>
-                <div className="lp-chip-list">
-                  {QUICK_SUGGESTIONS.map((item) => (
-                    <button
-                      key={item}
-                      type="button"
-                      className="lp-chat-chip"
-                      onClick={() => submitQuickSuggestion(item)}
+                    <input
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      placeholder="Ask me anything..."
+                      aria-label="Ask Pal input"
                       disabled={isLoading}
-                    >
-                      {item}
+                    />
+                    <button type="submit" aria-label="Send message" disabled={isLoading || !chatInput.trim()}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
                     </button>
-                  ))}
+                  </form>
                 </div>
-              </div>
+
+              </section>
             </section>
+
+            <p className="lp-ai-disclaimer">
+              Pal can make mistakes. Always verify important information.
+            </p>
           </aside>
         </div>
       </main>

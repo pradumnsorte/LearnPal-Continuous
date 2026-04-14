@@ -8,8 +8,9 @@
   --ff-ui:    'Inter',  sans-serif;  /* all UI text */
 
   /* Sticky layer offsets — compact player height per breakpoint */
-  --compact-player-h: calc((100vw - 520px) * 9 / 16 * 0.58);
-  --feature-row-h: 100px;   /* approx card height in 2-col layout */
+  /* Column = 100vw minus rail (51px) minus right col (463px) minus borders (~1px) */
+  --compact-player-h: calc((100vw - 516px) * 9 / 16 * 0.58);
+  --feature-row-h: 160px;   /* fallback — overwritten at runtime by ResizeObserver */
 
   /* Type scale — 8 steps, base 14 px */
   --fs-2xs:   11px;   /* timestamps, meta labels          */
@@ -41,7 +42,7 @@
 }
 
 body {
-  background: #edf2fa;
+  background: #ffffff;
   font-family: var(--ff-ui);
   font-size: var(--fs-base);
   font-weight: var(--fw-regular);

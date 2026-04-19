@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import './App.css'
 import transcriptRows from './data/transcript.json'
-import glossaryData from './data/glossary.json'
-import highlightsData from './data/highlights.json'
-import questionsData from './data/questions.json'
 import brandIcon from './assets/brand-icon.svg'
 import palCharacter from './assets/pal-character.svg'
 
@@ -36,13 +33,14 @@ const loadYouTubeIframeApi = () => {
 
 // ─── AI providers ────────────────────────────────────────────────────────────
 
-const PROVIDERS = { CLAUDE: 'claude', OPENAI: 'openai', GROQ: 'groq', OLLAMA: 'ollama' }
-const PROVIDER_CYCLE = [PROVIDERS.CLAUDE, PROVIDERS.OPENAI, PROVIDERS.GROQ, PROVIDERS.OLLAMA]
+const PROVIDERS = { CLAUDE: 'claude', OPENAI: 'openai', GROQ: 'groq', OLLAMA: 'ollama', AZURE: 'azure' }
+const PROVIDER_CYCLE = [PROVIDERS.AZURE, PROVIDERS.CLAUDE, PROVIDERS.OPENAI, PROVIDERS.GROQ, PROVIDERS.OLLAMA]
 const PROVIDER_LABELS = {
   [PROVIDERS.CLAUDE]: '✦ Claude',
   [PROVIDERS.OPENAI]: '⬡ GPT-4o',
   [PROVIDERS.GROQ]:   '⚡ Groq',
   [PROVIDERS.OLLAMA]: '🦙 Ollama',
+  [PROVIDERS.AZURE]:  '☁ Azure',
 }
 
 const QUICK_SUGGESTIONS = [
@@ -114,6 +112,18 @@ const callAI = async (provider, messages, currentSeconds, sessionId = null, quiz
   }
   const data = await res.json()
   return data.reply
+}
+
+// ─── Live analysis ────────────────────────────────────────────────────────────
+
+const callAnalyse = async (provider, chunk, previousTerms, previousQuestions) => {
+  const res = await fetch('/api/analyse', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider, chunk, previousTerms, previousQuestions }),
+  })
+  if (!res.ok) throw new Error(`Analyse error ${res.status}`)
+  return res.json()
 }
 
 // ─── Quiz generator ───────────────────────────────────────────────────────────
@@ -190,7 +200,7 @@ const generateQuizQuestion = async (provider, currentSeconds, previousQuestions 
 
 // ─── Glossary ─────────────────────────────────────────────────────────────────
 
-function Glossary({ currentSeconds, aiProvider, onCycleProvider }) {
+function Glossary({ currentSeconds, aiProvider, onCycleProvider, items = [] }) {
   const [isPaused, setIsPaused] = useState(false)
   const [frozenAt, setFrozenAt] = useState(null)
   const [removedIds, setRemovedIds] = useState(new Set())
@@ -199,7 +209,7 @@ function Glossary({ currentSeconds, aiProvider, onCycleProvider }) {
   const [newIds, setNewIds] = useState(new Set())
 
   const effectiveSeconds = isPaused ? (frozenAt ?? currentSeconds) : currentSeconds
-  const visible = glossaryData.filter((g) => g.timestampSeconds <= effectiveSeconds && !removedIds.has(g.id))
+  const visible = items.filter((g) => (g.arrivedAt ?? 0) <= effectiveSeconds && !removedIds.has(g.id))
 
   useEffect(() => {
     if (visible.length > prevCountRef.current) {
@@ -262,7 +272,7 @@ function Glossary({ currentSeconds, aiProvider, onCycleProvider }) {
                     {pinnedIds.has(g.id) && <span className="lp-pin-dot" aria-label="Pinned" />}
                     {g.term}
                   </span>
-                  <span className="lp-glossary-ts">{g.timestampStr}</span>
+                  <span className="lp-glossary-ts">{g.arrivedStr ?? formatTime(g.arrivedAt)}</span>
                 </div>
                 <p className="lp-glossary-def">{g.definition}</p>
                 <div className="lp-glossary-actions">
@@ -284,14 +294,14 @@ function Glossary({ currentSeconds, aiProvider, onCycleProvider }) {
 
 // ─── Highlights ───────────────────────────────────────────────────────────────
 
-function Highlights({ currentSeconds, onSeek, onDetailClick }) {
+function Highlights({ currentSeconds, onSeek, onDetailClick, items = [] }) {
   const [isPaused, setIsPaused] = useState(false)
   const [frozenAt, setFrozenAt] = useState(null)
   const prevCountRef = useRef(0)
   const [newIds, setNewIds] = useState(new Set())
 
   const effectiveSeconds = isPaused ? (frozenAt ?? currentSeconds) : currentSeconds
-  const visible = highlightsData.filter((h) => h.timestampSeconds <= effectiveSeconds)
+  const visible = items.filter((h) => (h.arrivedAt ?? 0) <= effectiveSeconds)
   const bookmarkItems = [...visible].slice(-4)
 
   useEffect(() => {
@@ -340,11 +350,11 @@ function Highlights({ currentSeconds, onSeek, onDetailClick }) {
             <li
               key={h.id}
               className={`lp-highlight-item${newIds.has(h.id) ? ' lp-highlight-new' : ''}`}
-              onClick={() => onSeek(h.timestampSeconds)}
+              onClick={() => onSeek(h.arrivedAt ?? 0)}
             >
               <div className="lp-highlight-title">
                 <span className="lp-highlight-dot" />
-                <span>{h.timestampStr}</span>
+                <span>{h.arrivedStr ?? formatTime(h.arrivedAt)}</span>
               </div>
               <span className="lp-highlight-text">{h.text}</span>
               <button
@@ -367,9 +377,9 @@ function Highlights({ currentSeconds, onSeek, onDetailClick }) {
           <ul className="lp-bookmarks-list">
             {bookmarkItems.map((item, idx) => (
               <li key={`bm-${item.id}`}>
-                <button type="button" className="lp-bookmark-item" onClick={() => onSeek(item.timestampSeconds)}>
+                <button type="button" className="lp-bookmark-item" onClick={() => onSeek(item.arrivedAt ?? 0)}>
                   <span className="lp-bookmark-index">{idx + 1}.</span>
-                  <span className="lp-bookmark-time">{item.timestampStr}</span>
+                  <span className="lp-bookmark-time">{item.arrivedStr ?? formatTime(item.arrivedAt)}</span>
                   <span className="lp-bookmark-text">{item.text}</span>
                 </button>
               </li>
@@ -383,7 +393,7 @@ function Highlights({ currentSeconds, onSeek, onDetailClick }) {
 
 // ─── Live Question Feed ───────────────────────────────────────────────────────
 
-function LiveQuestionFeed({ currentSeconds, onAnswered, onExplainAnswer, quizDifficulty, setQuizDifficulty, consecutiveCorrect, setConsecutiveCorrect }) {
+function LiveQuestionFeed({ currentSeconds, onAnswered, onExplainAnswer, quizDifficulty, setQuizDifficulty, consecutiveCorrect, setConsecutiveCorrect, items = [] }) {
   const [isPaused, setIsPaused] = useState(false)
   const [frozenAt, setFrozenAt] = useState(null)
   const [answers, setAnswers] = useState({})
@@ -392,7 +402,7 @@ function LiveQuestionFeed({ currentSeconds, onAnswered, onExplainAnswer, quizDif
   const optionLabels = ['A', 'B', 'C', 'D']
 
   const effectiveSeconds = isPaused ? (frozenAt ?? currentSeconds) : currentSeconds
-  const unlocked = questionsData.filter((q) => q.timestampSeconds <= effectiveSeconds)
+  const unlocked = items.filter((q) => (q.arrivedAt ?? 0) <= effectiveSeconds)
 
   useEffect(() => {
     if (unlocked.length > prevCountRef.current) {
@@ -471,7 +481,7 @@ function LiveQuestionFeed({ currentSeconds, onAnswered, onExplainAnswer, quizDif
             return (
               <li key={q.id} className={`lp-qfeed-item${isNew ? ' lp-qfeed-new' : ''}`}>
                 <div className="lp-qfeed-meta">
-                  <span className="lp-qfeed-ts">{q.timestampStr}</span>
+                  <span className="lp-qfeed-ts">{q.arrivedStr ?? formatTime(q.arrivedAt)}</span>
                   <span className={`lp-qfeed-diff lp-qfeed-diff-${q.difficulty}`}>
                     {q.difficulty === 1 ? 'Conceptual' : q.difficulty === 2 ? 'Applied' : 'Creative'}
                   </span>
@@ -611,7 +621,7 @@ export default function App() {
   const [playerKey, setPlayerKey]         = useState(0)
 
   // AI / session state
-  const [aiProvider, setAiProvider] = useState(PROVIDERS.GROQ)
+  const [aiProvider, setAiProvider] = useState(PROVIDERS.AZURE)
   const [sessionId, setSessionId]   = useState(null)
   const [participantId, setParticipantId] = useState('')
 
@@ -637,6 +647,15 @@ export default function App() {
   const [feedDifficulty, setFeedDifficulty]   = useState(1)
   const [feedConsecCorrect, setFeedConsecCorrect] = useState(0)
 
+  // Live AI analysis state
+  const [liveGlossary, setLiveGlossary]     = useState([])
+  const [liveHighlights, setLiveHighlights] = useState([])
+  const [liveQuestions, setLiveQuestions]   = useState([])
+  const lastAnalysedRowRef  = useRef(-1)
+  const isAnalysingRef      = useRef(false)
+  const liveGlossaryRef     = useRef([])
+  const liveQuestionsRef    = useRef([])
+
   // ── Session creation ───────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -649,6 +668,53 @@ export default function App() {
       .then((data) => setSessionId(data.id))
       .catch(() => {})
   }, [])
+
+  // ── Live analysis trigger ──────────────────────────────────────────────────
+
+  useEffect(() => {
+    const coveredRows = transcriptRows.filter((r) => r.seconds <= currentPlaybackSeconds)
+    if (coveredRows.length < 4) return
+    const lastIdx = coveredRows.length - 1
+    if (lastIdx - lastAnalysedRowRef.current < 4) return
+    if (isAnalysingRef.current) return
+
+    const chunkStart = lastAnalysedRowRef.current + 1
+    const chunk = coveredRows.slice(chunkStart, chunkStart + 4)
+    if (chunk.length === 0) return
+
+    isAnalysingRef.current = true
+    lastAnalysedRowRef.current = chunkStart + chunk.length - 1
+
+    const arrivedAt = currentPlaybackSeconds
+    const arrivedStr = formatTime(arrivedAt)
+    const prevTerms = liveGlossaryRef.current.map((g) => g.term)
+    const prevQs    = liveQuestionsRef.current.map((q) => q.question)
+
+    callAnalyse(aiProvider, chunk, prevTerms, prevQs)
+      .then((result) => {
+        const stamp = { arrivedAt, arrivedStr }
+        if (result.glossaryTerms?.length) {
+          const newItems = result.glossaryTerms.map((g, i) => ({ ...g, id: `g-${Date.now()}-${i}`, ...stamp }))
+          liveGlossaryRef.current = [...liveGlossaryRef.current, ...newItems]
+          setLiveGlossary((prev) => [...prev, ...newItems])
+        }
+        if (result.highlights?.length) {
+          setLiveHighlights((prev) => [
+            ...prev,
+            ...result.highlights.map((h, i) => ({ ...h, id: `h-${Date.now()}-${i}`, ...stamp })),
+          ])
+        }
+        if (result.questions?.length) {
+          const newQs = result.questions.map((q, i) => ({ ...q, id: `q-${Date.now()}-${i}`, ...stamp }))
+          liveQuestionsRef.current = [...liveQuestionsRef.current, ...newQs]
+          setLiveQuestions((prev) => [...prev, ...newQs])
+        }
+      })
+      .catch((err) => console.warn('[analyse]', err.message))
+      .finally(() => { isAnalysingRef.current = false })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPlaybackSeconds, aiProvider])
+
 
   // ── Event logging ──────────────────────────────────────────────────────────
 
@@ -1386,6 +1452,7 @@ export default function App() {
                   setCurrentPlaybackSeconds(t)
                 }}
                 onDetailClick={handleHighlightDetail}
+                items={liveHighlights}
               />
               <LiveQuestionFeed
                 currentSeconds={currentPlaybackSeconds}
@@ -1395,6 +1462,7 @@ export default function App() {
                 setQuizDifficulty={setFeedDifficulty}
                 consecutiveCorrect={feedConsecCorrect}
                 setConsecutiveCorrect={setFeedConsecCorrect}
+                items={liveQuestions}
               />
             </div>
 
@@ -1444,6 +1512,7 @@ export default function App() {
                     return PROVIDER_CYCLE[(idx + 1) % PROVIDER_CYCLE.length]
                   })
                 }
+                items={liveGlossary}
               />
             </div>
 

@@ -205,7 +205,7 @@ const generateQuizQuestion = async (provider, currentSeconds, previousQuestions 
 
 // ─── Glossary ─────────────────────────────────────────────────────────────────
 
-function Glossary({ currentSeconds, aiProvider, onCycleProvider, items = [] }) {
+function Glossary({ currentSeconds, aiProvider, analyseError, onCycleProvider, items = [] }) {
   const [isPaused, setIsPaused] = useState(false)
   const [frozenAt, setFrozenAt] = useState(null)
   const [removedIds, setRemovedIds] = useState(new Set())
@@ -264,11 +264,14 @@ function Glossary({ currentSeconds, aiProvider, onCycleProvider, items = [] }) {
           </span>
         </div>
         <div className="lp-glossary-topbar-right">
+          {analyseError && (
+            <span className="lp-provider-error" title={analyseError}>⚠ AI error — tap to switch</span>
+          )}
           <button
             type="button"
-            className="lp-provider-toggle"
+            className={`lp-provider-toggle${analyseError ? ' lp-provider-toggle--error' : ''}`}
             onClick={onCycleProvider}
-            title="Switch AI provider"
+            title={analyseError ? `Error: ${analyseError} — click to switch provider` : 'Switch AI provider'}
           >
             {PROVIDER_LABELS[aiProvider]}
           </button>
@@ -343,14 +346,12 @@ function FrameDot({ reg, videoBounds, onAsk, onOpen, onClose }) {
       <span className="lp-frame-dot-core" />
       {open && (
         <div className="lp-frame-dot-tooltip">
-          <span className="lp-frame-dot-tooltip-label">{reg.label}</span>
-          <span className="lp-frame-dot-tooltip-desc">{reg.description}</span>
           <button
             type="button"
             className="lp-frame-dot-tooltip-ask"
-            onClick={(e) => { e.stopPropagation(); onAsk?.() }}
+            onClick={(e) => { e.stopPropagation(); onAsk?.(); setOpen(false); onClose?.() }}
           >
-            Ask Pal about this
+            Explain in detail
           </button>
         </div>
       )}
@@ -465,7 +466,13 @@ function Highlights({ currentSeconds, onSeek, onPause, onDetailClick, onShowRegi
       </div>
 
       {!featured ? (
-        <p className="lp-placeholder">Highlights will appear as the video progresses.</p>
+        <div className="lp-empty-state">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true" className="lp-empty-icon">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          <span className="lp-empty-label">Watching for highlights</span>
+          <span className="lp-empty-dot" />
+        </div>
       ) : (
         <>
           <div
@@ -660,7 +667,13 @@ function LiveQuestionFeed({ currentSeconds, onAnswered, onExplainAnswer, quizDif
       </div>
 
       {unlocked.length === 0 || !q ? (
-        <p className="lp-placeholder">Questions will appear as you watch.</p>
+        <div className="lp-empty-state">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true" className="lp-empty-icon">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          <span className="lp-empty-label">Generating your first question</span>
+          <span className="lp-empty-dot" />
+        </div>
       ) : (
         <>
           {/* Status pills — clickable jumps */}
@@ -879,6 +892,7 @@ export default function App() {
   const [feedConsecCorrect, setFeedConsecCorrect] = useState(0)
 
   // Live AI analysis state
+  const [analyseError, setAnalyseError]     = useState(null)
   const [liveGlossary, setLiveGlossary]     = useState([])
   const [liveHighlights, setLiveHighlights] = useState([])
   const [liveQuestions, setLiveQuestions]   = useState([])
@@ -1026,6 +1040,7 @@ export default function App() {
       .catch((err) => {
         lastAnalysedRowRef.current = chunkStart + Math.max(2, Math.floor(chunk.length / 2)) - 1
         console.warn('[analyse]', err.message)
+        setAnalyseError(err.message)
       })
       .finally(() => { isAnalysingRef.current = false })
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2014,12 +2029,14 @@ export default function App() {
               <Glossary
                 currentSeconds={currentPlaybackSeconds}
                 aiProvider={aiProvider}
-                onCycleProvider={() =>
+                analyseError={analyseError}
+                onCycleProvider={() => {
+                  setAnalyseError(null)
                   setAiProvider((p) => {
                     const idx = PROVIDER_CYCLE.indexOf(p)
                     return PROVIDER_CYCLE[(idx + 1) % PROVIDER_CYCLE.length]
                   })
-                }
+                }}
                 items={liveGlossary}
               />
             </div>
@@ -2108,7 +2125,7 @@ export default function App() {
                       aria-label="Ask Pal input"
                       disabled={isLoading}
                     />
-                    <button type="submit" aria-label="Send message" disabled={isLoading || !chatInput.trim()}>
+                    <button type="submit" aria-label="Send message" disabled={isLoading}>
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                         <path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
                       </svg>

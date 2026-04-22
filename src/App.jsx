@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
 import './App.css'
 import transcriptRows from './data/transcript.json'
 import brandIcon from './assets/brand-icon.svg'
@@ -33,14 +34,13 @@ const loadYouTubeIframeApi = () => {
 
 // ─── AI providers ────────────────────────────────────────────────────────────
 
-const PROVIDERS = { CLAUDE: 'claude', OPENAI: 'openai', GROQ: 'groq', OLLAMA: 'ollama', AZURE: 'azure' }
-const PROVIDER_CYCLE = [PROVIDERS.AZURE, PROVIDERS.CLAUDE, PROVIDERS.OPENAI, PROVIDERS.GROQ, PROVIDERS.OLLAMA]
+const PROVIDERS = { GROQ: 'groq', AZURE: 'azure', AZURE_54: 'azure-54', OLLAMA: 'ollama' }
+const PROVIDER_CYCLE = [PROVIDERS.AZURE, PROVIDERS.AZURE_54, PROVIDERS.GROQ, PROVIDERS.OLLAMA]
 const PROVIDER_LABELS = {
-  [PROVIDERS.CLAUDE]: '✦ Claude',
-  [PROVIDERS.OPENAI]: '⬡ GPT-4o',
-  [PROVIDERS.GROQ]:   '⚡ Groq',
-  [PROVIDERS.OLLAMA]: '🦙 Ollama',
-  [PROVIDERS.AZURE]:  '☁ Azure',
+  [PROVIDERS.AZURE]:    '⬡ GPT-4o mini',
+  [PROVIDERS.AZURE_54]: '⬡ GPT-5.4 mini',
+  [PROVIDERS.GROQ]:     '⚡ Groq',
+  [PROVIDERS.OLLAMA]:   '🦙 Ollama',
 }
 
 const QUICK_SUGGESTIONS = [
@@ -88,13 +88,18 @@ const buildSystemPrompt = (currentSeconds, quizHistory = [], messages = []) => {
 
   return `You are Pal, a friendly learning assistant embedded in LearnPal, a video learning app.
 
-The user is watching: "The Essential Main Ideas of Neural Networks" by StatQuest.
-Current video position: ${timeStr}
+The user is currently learning about neural networks (video: "The Essential Main Ideas of Neural Networks" by StatQuest, position: ${timeStr}).
 
-Recent transcript context:
+The following topics are being covered at this moment — use this as background knowledge to stay relevant, not as a source to cite:
 ${recentContext || 'Video just started.'}
 ${sessionContext}
-Help the user understand the video. Be concise (under 150 words unless asked for more), clear, and educational. Use simple language and real-world examples when helpful. Use the session context to personalise your responses — if the user got a quiz question wrong, address that gap.`
+You are a subject-matter expert in machine learning and neural networks. Explain every concept from first principles, with full depth — don't summarise, don't simplify away important detail, and never truncate. Go beyond the immediate question: bring in related concepts, real-world applications, intuitive analogies, and historical context where they add value. Your goal is to leave the user with a genuinely deeper understanding than any single video could provide.
+
+Never reference the video, transcript, or presenter as a source. Do not say "the transcript says", "in the video", "the presenter mentions", "as stated", or anything similar. You simply know this material — explain it that way. The background topics above are only to help you stay contextually relevant; they are not a script to follow or cite.
+
+Use the session context to personalise your responses — if the user got a quiz question wrong, directly address that misconception with a clear, corrective explanation.
+
+Format your responses using markdown: use **bold** for key terms, bullet points or numbered lists for multi-part answers, and short paragraphs. Keep it conversational and clear — like a brilliant tutor who genuinely loves the subject.`
 }
 
 // ─── AI chat ─────────────────────────────────────────────────────────────────
@@ -116,11 +121,11 @@ const callAI = async (provider, messages, currentSeconds, sessionId = null, quiz
 
 // ─── Live analysis ────────────────────────────────────────────────────────────
 
-const callAnalyse = async (provider, chunk, previousTerms, previousQuestions) => {
+const callAnalyse = async (provider, chunk, previousTerms, previousQuestions, frameBase64 = null) => {
   const res = await fetch('/api/analyse', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ provider, chunk, previousTerms, previousQuestions }),
+    body: JSON.stringify({ provider, chunk, previousTerms, previousQuestions, frameBase64 }),
   })
   if (!res.ok) throw new Error(`Analyse error ${res.status}`)
   return res.json()
@@ -207,9 +212,18 @@ function Glossary({ currentSeconds, aiProvider, onCycleProvider, items = [] }) {
   const [pinnedIds, setPinnedIds] = useState(new Set())
   const prevCountRef = useRef(0)
   const [newIds, setNewIds] = useState(new Set())
+  const [revealedIds, setRevealedIds] = useState(new Set())
 
   const effectiveSeconds = isPaused ? (frozenAt ?? currentSeconds) : currentSeconds
-  const visible = items.filter((g) => (g.arrivedAt ?? 0) <= effectiveSeconds && !removedIds.has(g.id))
+
+  useEffect(() => {
+    const toAdd = items.filter(g => (g.arrivedAt ?? 0) <= effectiveSeconds && !revealedIds.has(g.id))
+    if (toAdd.length > 0) {
+      setRevealedIds(prev => { const n = new Set(prev); toAdd.forEach(g => n.add(g.id)); return n })
+    }
+  }, [effectiveSeconds, items])
+
+  const visible = items.filter((g) => revealedIds.has(g.id) && !removedIds.has(g.id))
 
   useEffect(() => {
     if (visible.length > prevCountRef.current) {
@@ -242,25 +256,28 @@ function Glossary({ currentSeconds, aiProvider, onCycleProvider, items = [] }) {
   return (
     <section className="lp-glossary">
       <div className="lp-glossary-topbar">
-        <h2>Pal&apos;s Key Word Glossary</h2>
-        <button
-          type="button"
-          className="lp-provider-toggle"
-          onClick={onCycleProvider}
-          title="Switch AI provider"
-        >
-          {PROVIDER_LABELS[aiProvider]}
-        </button>
-      </div>
-      <div className="lp-glossary-content">
-        <div className="lp-section-controls">
-          <span className={`lp-live-chip${isPaused ? ' lp-live-chip-paused' : ''}`}>
-            {isPaused ? 'Paused' : 'Live sync'}
+        <div className="lp-glossary-topbar-left">
+          <h2>Pal&apos;s Key Word Glossary</h2>
+          <span className={`lp-live-status${isPaused ? ' lp-live-status--paused' : ''}`}>
+            <span className="lp-live-dot" />
+            {isPaused ? 'Paused' : 'Live'}
           </span>
-          <button type="button" className="lp-section-stop" onClick={togglePause}>
+        </div>
+        <div className="lp-glossary-topbar-right">
+          <button
+            type="button"
+            className="lp-provider-toggle"
+            onClick={onCycleProvider}
+            title="Switch AI provider"
+          >
+            {PROVIDER_LABELS[aiProvider]}
+          </button>
+          <button type="button" className={`lp-section-stop${isPaused ? ' lp-section-stop--cta' : ''}`} onClick={togglePause}>
             {isPaused ? 'Resume' : 'Stop'}
           </button>
         </div>
+      </div>
+      <div className="lp-glossary-content">
         {sorted.length === 0 ? (
           <p className="lp-placeholder">Key terms will appear as the video progresses.</p>
         ) : (
@@ -292,23 +309,90 @@ function Glossary({ currentSeconds, aiProvider, onCycleProvider, items = [] }) {
   )
 }
 
+// ─── Frame dot overlay (concentric marker on video) ──────────────────────────
+
+function FrameDot({ reg, onAsk, onOpen, onClose }) {
+  const [open, setOpen] = useState(false)
+  const dotRef = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    const close = (e) => { if (!dotRef.current?.contains(e.target)) { setOpen(false); onClose?.() } }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [open, onClose])
+
+  const toggle = (e) => {
+    e.stopPropagation()
+    const opening = !open
+    setOpen(opening)
+    if (opening) onOpen?.()
+    else onClose?.()
+  }
+
+  return (
+    <div
+      ref={dotRef}
+      className={`lp-frame-dot${open ? ' lp-frame-dot--open' : ''}`}
+      style={{ left: `${reg.x + reg.width / 2}%`, top: `${reg.y + reg.height / 2}%` }}
+      onClick={toggle}
+    >
+      <span className="lp-frame-dot-core" />
+      {open && (
+        <div className="lp-frame-dot-tooltip">
+          <span className="lp-frame-dot-tooltip-label">{reg.label}</span>
+          <span className="lp-frame-dot-tooltip-desc">{reg.description}</span>
+          <button
+            type="button"
+            className="lp-frame-dot-tooltip-ask"
+            onClick={(e) => { e.stopPropagation(); onAsk?.() }}
+          >
+            Ask Pal about this
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Highlights ───────────────────────────────────────────────────────────────
 
-function Highlights({ currentSeconds, onSeek, onDetailClick, items = [] }) {
+function Highlights({ currentSeconds, onSeek, onPause, onDetailClick, onShowRegions, items = [] }) {
   const [isPaused, setIsPaused] = useState(false)
   const [frozenAt, setFrozenAt] = useState(null)
   const prevCountRef = useRef(0)
   const [newIds, setNewIds] = useState(new Set())
+  const [revealedIds, setRevealedIds] = useState(new Set())
+  const [featuredId, setFeaturedId] = useState(null)
+  const [tipOpen, setTipOpen] = useState(false)
+  const tipRef = useRef(null)
+
+  useEffect(() => {
+    if (!tipOpen) return
+    const close = (e) => { if (!tipRef.current?.contains(e.target)) setTipOpen(false) }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [tipOpen])
 
   const effectiveSeconds = isPaused ? (frozenAt ?? currentSeconds) : currentSeconds
-  const visible = items.filter((h) => (h.arrivedAt ?? 0) <= effectiveSeconds)
-  const bookmarkItems = [...visible].slice(-4)
+
+  // Revealed set only grows — seeking back never hides already-shown items
+  useEffect(() => {
+    const toAdd = items.filter(h => (h.arrivedAt ?? 0) <= effectiveSeconds && !revealedIds.has(h.id))
+    if (toAdd.length > 0) {
+      setRevealedIds(prev => { const n = new Set(prev); toAdd.forEach(h => n.add(h.id)); return n })
+    }
+  }, [effectiveSeconds, items])
+
+  const visible = items.filter(h => revealedIds.has(h.id))
 
   useEffect(() => {
     if (visible.length > prevCountRef.current) {
       const added = visible.slice(prevCountRef.current).map((h) => h.id)
       setNewIds(new Set(added))
       const timer = setTimeout(() => setNewIds(new Set()), 1200)
+      // Only promote to featured if there's no current featured being shown
+      setFeaturedId(prev => prev ?? added[added.length - 1])
       prevCountRef.current = visible.length
       return () => clearTimeout(timer)
     }
@@ -320,73 +404,104 @@ function Highlights({ currentSeconds, onSeek, onDetailClick, items = [] }) {
     else { setFrozenAt(null); setIsPaused(false) }
   }
 
+  // Latest first — featured is pinned until user promotes another
+  const sorted = [...visible].sort((a, b) => (b.arrivedAt ?? 0) - (a.arrivedAt ?? 0))
+  const featured = visible.find(h => h.id === featuredId) ?? sorted[0]
+  const older = sorted.filter(h => h.id !== featured?.id)
+
+  const handleOldClick = (h) => {
+    // Promote clicked item to featured, seek video to it
+    setFeaturedId(h.id)
+    onSeek(h.arrivedAt ?? 0)
+    if (h.regions?.length && onShowRegions) onShowRegions(h.regions)
+  }
+
   return (
     <section className="lp-highlights">
       <div className="lp-section-header-row">
         <div className="lp-section-heading-group">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" stroke="#0336ff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
           <h2>Explore highlights</h2>
-          <div className="lp-info-tip">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.8"/>
-              <line x1="12" y1="8" x2="12" y2="8.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-              <line x1="12" y1="11" x2="12" y2="16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
-            </svg>
-            <div className="lp-tip-bubble" role="tooltip">
-              {isPaused
-                ? 'Highlights paused — other modules continue running.'
-                : 'Parts of the video are highlighted as this lesson progresses.'}
-            </div>
+          <div className="lp-info-tip" ref={tipRef}>
+            <button
+              type="button"
+              className={`lp-info-tip-btn${tipOpen ? ' lp-info-tip-btn--open' : ''}`}
+              onClick={() => {
+                const opening = !tipOpen
+                setTipOpen(opening)
+                if (opening) onPause?.()
+              }}
+              aria-label="About this section"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.8"/>
+                <line x1="12" y1="8" x2="12" y2="8.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                <line x1="12" y1="11" x2="12" y2="16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+              </svg>
+            </button>
+            {tipOpen && (
+              <div className="lp-tip-bubble lp-tip-bubble--open" role="tooltip">
+                {isPaused ? (
+                  <>
+                    <strong>Highlights paused.</strong> New highlights won't be generated, but the rest of LearnPal continues running normally. Resume anytime.
+                  </>
+                ) : (
+                  <>
+                    <strong>Explore Highlights</strong> automatically identifies key concepts and interesting moments as you watch. The most recent highlight appears in full — click it to jump to that point in the video or ask Pal about it. Earlier highlights collapse into the list below.
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
-        <button type="button" className="lp-section-stop" onClick={togglePause}>
+        <button type="button" className={`lp-section-stop${isPaused ? ' lp-section-stop--cta' : ''}`} onClick={togglePause}>
           {isPaused ? 'Resume' : 'Hide'}
         </button>
       </div>
-      {visible.length === 0 ? (
+
+      {!featured ? (
         <p className="lp-placeholder">Highlights will appear as the video progresses.</p>
       ) : (
-        <ul className="lp-highlights-list">
-          {[...visible].reverse().map((h) => (
-            <li
-              key={h.id}
-              className={`lp-highlight-item${newIds.has(h.id) ? ' lp-highlight-new' : ''}`}
-              onClick={() => onSeek(h.arrivedAt ?? 0)}
+        <>
+          <div
+            className={`lp-highlight-item${newIds.has(featured.id) ? ' lp-highlight-new' : ''}`}
+            onClick={() => handleOldClick(featured)}
+          >
+            <div className="lp-highlight-title">
+              <span className="lp-highlight-dot" />
+              <span>{featured.arrivedStr ?? formatTime(featured.arrivedAt)}</span>
+            </div>
+            <span className="lp-highlight-text">{featured.text}</span>
+            <button
+              type="button"
+              className="lp-highlight-cta"
+              onClick={(e) => { e.stopPropagation(); onDetailClick(featured) }}
             >
-              <div className="lp-highlight-title">
-                <span className="lp-highlight-dot" />
-                <span>{h.arrivedStr ?? formatTime(h.arrivedAt)}</span>
-              </div>
-              <span className="lp-highlight-text">{h.text}</span>
-              <button
-                type="button"
-                className="lp-highlight-cta"
-                onClick={(e) => { e.stopPropagation(); onDetailClick(h) }}
-              >
-                Detail
-              </button>
-            </li>
-          ))}
-        </ul>
+              Detail
+            </button>
+          </div>
+
+          {older.length > 0 && (
+            <>
+              <div className="lp-highlights-older-label">Earlier ({older.length})</div>
+              <ul className="lp-highlights-older-list">
+                {older.map((h) => (
+                  <li
+                    key={h.id}
+                    className={`lp-highlight-compact${newIds.has(h.id) ? ' lp-highlight-new' : ''}`}
+                    onClick={() => handleOldClick(h)}
+                  >
+                    <span className="lp-highlight-compact-time">{h.arrivedStr ?? formatTime(h.arrivedAt)}</span>
+                    <span className="lp-highlight-compact-text">{h.text}</span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </>
       )}
-      <div className="lp-bookmarks">
-        <div className="lp-bookmarks-title">Bookmarks</div>
-        <div className="lp-bookmarks-divider" />
-        {bookmarkItems.length === 0 ? (
-          <p className="lp-placeholder">No bookmarks yet.</p>
-        ) : (
-          <ul className="lp-bookmarks-list">
-            {bookmarkItems.map((item, idx) => (
-              <li key={`bm-${item.id}`}>
-                <button type="button" className="lp-bookmark-item" onClick={() => onSeek(item.arrivedAt ?? 0)}>
-                  <span className="lp-bookmark-index">{idx + 1}.</span>
-                  <span className="lp-bookmark-time">{item.arrivedStr ?? formatTime(item.arrivedAt)}</span>
-                  <span className="lp-bookmark-text">{item.text}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
     </section>
   )
 }
@@ -397,18 +512,39 @@ function LiveQuestionFeed({ currentSeconds, onAnswered, onExplainAnswer, quizDif
   const [isPaused, setIsPaused] = useState(false)
   const [frozenAt, setFrozenAt] = useState(null)
   const [answers, setAnswers] = useState({})
+  const [currentIdx, setCurrentIdx] = useState(0)
+  const userNavigatedRef = useRef(false)
   const prevCountRef = useRef(0)
   const [newIds, setNewIds] = useState(new Set())
+  const [tipOpen, setTipOpen] = useState(false)
+  const tipRef = useRef(null)
   const optionLabels = ['A', 'B', 'C', 'D']
 
+  useEffect(() => {
+    if (!tipOpen) return
+    const close = (e) => { if (!tipRef.current?.contains(e.target)) setTipOpen(false) }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [tipOpen])
+
   const effectiveSeconds = isPaused ? (frozenAt ?? currentSeconds) : currentSeconds
-  const unlocked = items.filter((q) => (q.arrivedAt ?? 0) <= effectiveSeconds)
+  const [revealedIds, setRevealedIds] = useState(new Set())
+
+  useEffect(() => {
+    const toAdd = items.filter(q => (q.arrivedAt ?? 0) <= effectiveSeconds && !revealedIds.has(q.id))
+    if (toAdd.length > 0) {
+      setRevealedIds(prev => { const n = new Set(prev); toAdd.forEach(q => n.add(q.id)); return n })
+    }
+  }, [effectiveSeconds, items])
+
+  const unlocked = items.filter(q => revealedIds.has(q.id))
 
   useEffect(() => {
     if (unlocked.length > prevCountRef.current) {
       const added = unlocked.slice(prevCountRef.current).map((q) => q.id)
       setNewIds(new Set(added))
       const timer = setTimeout(() => setNewIds(new Set()), 1500)
+      if (!userNavigatedRef.current) setCurrentIdx(unlocked.length - 1)
       prevCountRef.current = unlocked.length
       return () => clearTimeout(timer)
     }
@@ -447,114 +583,201 @@ function LiveQuestionFeed({ currentSeconds, onAnswered, onExplainAnswer, quizDif
     setAnswers((prev) => ({ ...prev, [qid]: { ...prev[qid], skipped: true } }))
   }
 
-  const displayed = [...unlocked].reverse()
+  const statusOf = (qq) => {
+    const s = answers[qq.id]
+    if (!s) return 'unanswered'
+    if (s.submitted) return s.isCorrect ? 'correct' : 'wrong'
+    if (s.skipped) return 'skipped'
+    return 'unanswered'
+  }
+
+  const safeIdx = Math.min(currentIdx, Math.max(0, unlocked.length - 1))
+  const q = unlocked[safeIdx]
+  const state = q ? (answers[q.id] ?? {}) : {}
+
+  const goPrev = () => {
+    userNavigatedRef.current = true
+    setCurrentIdx((i) => Math.max(0, i - 1))
+  }
+
+  const goNext = () => {
+    setCurrentIdx((i) => {
+      const next = Math.min(unlocked.length - 1, i + 1)
+      // Back on the newest → allow auto-advance again
+      if (next === unlocked.length - 1) userNavigatedRef.current = false
+      else userNavigatedRef.current = true
+      return next
+    })
+  }
+
+  const jumpTo = (i) => {
+    setCurrentIdx(i)
+    userNavigatedRef.current = i !== unlocked.length - 1
+  }
 
   return (
     <section className="lp-question-feed">
       <div className="lp-section-header-row">
         <div className="lp-section-heading-group">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" stroke="#0336ff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
           <h2>Live question feed</h2>
-          <div className="lp-info-tip">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.8"/>
-              <line x1="12" y1="8" x2="12" y2="8.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-              <line x1="12" y1="11" x2="12" y2="16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
-            </svg>
-            <div className="lp-tip-bubble" role="tooltip">
-              {isPaused
-                ? 'Question feed paused — other modules continue running.'
-                : 'Questions update as the lesson progresses. Answer on the go for better comprehension.'}
-            </div>
+          <div className="lp-info-tip" ref={tipRef}>
+            <button
+              type="button"
+              className={`lp-info-tip-btn${tipOpen ? ' lp-info-tip-btn--open' : ''}`}
+              onClick={() => setTipOpen(o => !o)}
+              aria-label="About this section"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.8"/>
+                <line x1="12" y1="8" x2="12" y2="8.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                <line x1="12" y1="11" x2="12" y2="16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+              </svg>
+            </button>
+            {tipOpen && (
+              <div className="lp-tip-bubble lp-tip-bubble--open" role="tooltip">
+                {isPaused ? (
+                  <>
+                    <strong>Question feed paused.</strong> No new questions will be generated, but the rest of LearnPal continues running normally. Resume anytime.
+                  </>
+                ) : (
+                  <>
+                    <strong>Live Question Feed</strong> generates quiz questions in real time based on what you're watching. Answer each one to test your understanding, then ask Pal to explain if you're unsure. Use the numbered pills to revisit earlier questions — green means correct, red means wrong, grey means skipped.
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
-        <button type="button" className="lp-section-stop" onClick={togglePause}>
+        <button type="button" className={`lp-section-stop${isPaused ? ' lp-section-stop--cta' : ''}`} onClick={togglePause}>
           {isPaused ? 'Resume' : 'Stop'}
         </button>
       </div>
-      {displayed.length === 0 ? (
+
+      {unlocked.length === 0 || !q ? (
         <p className="lp-placeholder">Questions will appear as you watch.</p>
       ) : (
-        <ul className="lp-qfeed-list">
-          {displayed.map((q) => {
-            const state = answers[q.id] ?? {}
-            const isNew = newIds.has(q.id)
-            return (
-              <li key={q.id} className={`lp-qfeed-item${isNew ? ' lp-qfeed-new' : ''}`}>
-                <div className="lp-qfeed-meta">
-                  <span className="lp-qfeed-ts">{q.arrivedStr ?? formatTime(q.arrivedAt)}</span>
-                  <span className={`lp-qfeed-diff lp-qfeed-diff-${q.difficulty}`}>
-                    {q.difficulty === 1 ? 'Conceptual' : q.difficulty === 2 ? 'Applied' : 'Creative'}
-                  </span>
-                </div>
-                <p className="lp-qfeed-question">{q.question}</p>
-                <ul className="lp-qfeed-options">
-                  {q.options.map((opt, idx) => {
-                    let cls = 'lp-qfeed-option'
-                    if (state.submitted) {
-                      if (idx === q.correctIndex) cls += ' lp-qfeed-correct'
-                      else if (idx === state.selected) cls += ' lp-qfeed-wrong'
-                    } else if (state.selected === idx) {
-                      cls += ' lp-qfeed-selected'
-                    }
-                    const label = optionLabels[idx] ?? String.fromCharCode(65 + idx)
-                    return (
-                      <li key={idx}>
-                        <button
-                          type="button"
-                          className={cls}
-                          onClick={() => selectOption(q.id, idx)}
-                          disabled={!!state.submitted || !!state.skipped}
-                        >
-                          <span className="lp-option-label">{label}.</span>
-                          {opt}
-                        </button>
-                      </li>
-                    )
-                  })}
-                </ul>
-                {!state.submitted && !state.skipped && (
-                  <div className="lp-qfeed-actions">
-                    <button type="button" className="lp-qfeed-skip" onClick={() => skipQuestion(q.id)}>
-                      Skip
-                    </button>
-                    {state.selected !== null && state.selected !== undefined && (
-                      <button type="button" className="lp-qfeed-submit" onClick={() => submit(q)}>
-                        Submit
-                      </button>
-                    )}
-                  </div>
-                )}
-                {state.skipped && !state.submitted && (
-                  <div className="lp-qfeed-actions">
-                    <p className="lp-qfeed-skipped">Skipped — you can still answer above.</p>
-                    {state.selected !== null && state.selected !== undefined && (
-                      <button type="button" className="lp-qfeed-submit" onClick={() => submit(q)}>
-                        Submit
-                      </button>
-                    )}
-                  </div>
-                )}
-                {state.submitted && (
-                  <>
-                    <div className={`lp-qfeed-feedback ${state.isCorrect ? 'lp-qfeed-fb-correct' : 'lp-qfeed-fb-wrong'}`}>
-                      <span>{state.isCorrect ? 'Correct!' : 'Not quite.'}</span>
-                      <p>{q.explanation}</p>
-                    </div>
-                    <div className="lp-qfeed-post-actions">
+        <>
+          {/* Status pills — clickable jumps */}
+          <div className="lp-qfeed-pills" role="tablist">
+            {unlocked.map((qq, i) => {
+              const status = statusOf(qq)
+              const isActive = i === safeIdx
+              return (
+                <button
+                  key={qq.id}
+                  type="button"
+                  className={`lp-qfeed-pill lp-qfeed-pill-${status}${isActive ? ' lp-qfeed-pill-active' : ''}`}
+                  onClick={() => jumpTo(i)}
+                  title={`Q${i + 1} — ${status}`}
+                >
+                  {i + 1}
+                </button>
+              )
+            })}
+          </div>
+
+          {/* Pager: prev ◀ | card | ▶ next */}
+          <div className="lp-qfeed-pager">
+            <button
+              type="button"
+              className="lp-qfeed-nav"
+              onClick={goPrev}
+              disabled={safeIdx === 0}
+              aria-label="Previous question"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M15 18l-6-6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+
+            <div className={`lp-qfeed-item${newIds.has(q.id) ? ' lp-qfeed-new' : ''}`}>
+              <div className="lp-qfeed-meta">
+                <span className="lp-qfeed-idx">Q{safeIdx + 1}/{unlocked.length}</span>
+                <span className="lp-qfeed-ts">{q.arrivedStr ?? formatTime(q.arrivedAt)}</span>
+              </div>
+              <p className="lp-qfeed-question">{q.question}</p>
+              <ul className="lp-qfeed-options">
+                {q.options.map((opt, idx) => {
+                  let cls = 'lp-qfeed-option'
+                  if (state.submitted) {
+                    if (idx === q.correctIndex) cls += ' lp-qfeed-correct'
+                    else if (idx === state.selected) cls += ' lp-qfeed-wrong'
+                  } else if (state.selected === idx) {
+                    cls += ' lp-qfeed-selected'
+                  }
+                  const label = optionLabels[idx] ?? String.fromCharCode(65 + idx)
+                  return (
+                    <li key={idx}>
                       <button
                         type="button"
-                        className="lp-qfeed-explain-btn"
-                        onClick={() => onExplainAnswer(q, state.selected, state.isCorrect)}
+                        className={cls}
+                        onClick={() => selectOption(q.id, idx)}
+                        disabled={!!state.submitted || !!state.skipped}
                       >
-                        Explain this answer
+                        <span className="lp-option-label">{label}.</span>
+                        {opt}
                       </button>
-                    </div>
-                  </>
-                )}
-              </li>
-            )
-          })}
-        </ul>
+                    </li>
+                  )
+                })}
+              </ul>
+              {!state.submitted && !state.skipped && (
+                <div className="lp-qfeed-actions">
+                  <button type="button" className="lp-qfeed-skip" onClick={() => skipQuestion(q.id)}>
+                    Skip
+                  </button>
+                  {state.selected !== null && state.selected !== undefined && (
+                    <button type="button" className="lp-qfeed-submit" onClick={() => submit(q)}>
+                      Submit
+                    </button>
+                  )}
+                </div>
+              )}
+              {state.skipped && !state.submitted && (
+                <div className="lp-qfeed-actions">
+                  <p className="lp-qfeed-skipped">Skipped — you can still answer above.</p>
+                  {state.selected !== null && state.selected !== undefined && (
+                    <button type="button" className="lp-qfeed-submit" onClick={() => submit(q)}>
+                      Submit
+                    </button>
+                  )}
+                </div>
+              )}
+              {state.submitted && (
+                <>
+                  <div className={`lp-qfeed-feedback ${state.isCorrect ? 'lp-qfeed-fb-correct' : 'lp-qfeed-fb-wrong'}`}>
+                    <span>{state.isCorrect ? 'Correct!' : 'Not quite.'}</span>
+                    <p>{q.explanation}</p>
+                  </div>
+                  <div className="lp-qfeed-post-actions">
+                    <button
+                      type="button"
+                      className="lp-qfeed-explain-btn"
+                      onClick={() => onExplainAnswer(q, state.selected, state.isCorrect)}
+                    >
+                      Explain this answer
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <button
+              type="button"
+              className="lp-qfeed-nav"
+              onClick={goNext}
+              disabled={safeIdx >= unlocked.length - 1}
+              aria-label="Next question"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M9 18l6-6-6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+          </div>
+        </>
       )}
     </section>
   )
@@ -578,6 +801,9 @@ export default function App() {
   const centerColumnRef = useRef(null)
   const playerControlsModeRef = useRef('custom')
   const savedTimeRef    = useRef(0)
+  const localVideoRef   = useRef(null)
+  const canvasRef       = useRef(null)
+  const videoSourceRef  = useRef('local')
 
   // Settings refs
   const gearBtnRef      = useRef(null)
@@ -619,6 +845,7 @@ export default function App() {
   const [playerControlsMode, setPlayerControlsMode] = useState('custom') // 'custom' | 'native'
   const [showSettings, setShowSettings]   = useState(false)
   const [playerKey, setPlayerKey]         = useState(0)
+  const [videoSource, setVideoSource]     = useState('local') // 'youtube' | 'local'
 
   // AI / session state
   const [aiProvider, setAiProvider] = useState(PROVIDERS.AZURE)
@@ -651,10 +878,12 @@ export default function App() {
   const [liveGlossary, setLiveGlossary]     = useState([])
   const [liveHighlights, setLiveHighlights] = useState([])
   const [liveQuestions, setLiveQuestions]   = useState([])
-  const lastAnalysedRowRef  = useRef(-1)
-  const isAnalysingRef      = useRef(false)
-  const liveGlossaryRef     = useRef([])
-  const liveQuestionsRef    = useRef([])
+  const [frameRegions, setFrameRegions]     = useState([]) // overlays on video
+  const lastAnalysedRowRef      = useRef(-1)
+  const isAnalysingRef          = useRef(false)
+  const liveGlossaryRef         = useRef([])
+  const liveQuestionsRef        = useRef([])
+  const frameOverlayTimerRef    = useRef(null)
 
   // ── Session creation ───────────────────────────────────────────────────────
 
@@ -669,7 +898,10 @@ export default function App() {
       .catch(() => {})
   }, [])
 
-  // ── Live analysis trigger ──────────────────────────────────────────────────
+  // ── Unified live analysis — transcript chunk + optional video frame ────────
+  // Triggered every 4–12 transcript rows. When playing local video, a 480×270
+  // JPEG frame is captured and sent alongside the transcript so a single API
+  // call returns glossary terms, highlights, questions, AND visual regions.
 
   useEffect(() => {
     const coveredRows = transcriptRows.filter((r) => r.seconds <= currentPlaybackSeconds)
@@ -679,20 +911,37 @@ export default function App() {
     if (isAnalysingRef.current) return
 
     const chunkStart = lastAnalysedRowRef.current + 1
-    const chunk = coveredRows.slice(chunkStart, chunkStart + 4)
+    const chunk = coveredRows.slice(chunkStart, chunkStart + 12)
     if (chunk.length === 0) return
 
+    // Capture a low-res frame if local video is playing (480×270 ≈ 20 KB JPEG)
+    let frameBase64 = null
+    if (videoSourceRef.current === 'local' && isPlayingRef.current) {
+      const video  = localVideoRef.current
+      const canvas = canvasRef.current
+      if (video && canvas && video.readyState >= 2) {
+        canvas.width  = 480
+        canvas.height = 270
+        canvas.getContext('2d').drawImage(video, 0, 0, 480, 270)
+        frameBase64 = canvas.toDataURL('image/jpeg', 0.65).replace('data:image/jpeg;base64,', '')
+      }
+    }
+
     isAnalysingRef.current = true
-    lastAnalysedRowRef.current = chunkStart + chunk.length - 1
 
     const arrivedAt = currentPlaybackSeconds
     const arrivedStr = formatTime(arrivedAt)
     const prevTerms = liveGlossaryRef.current.map((g) => g.term)
     const prevQs    = liveQuestionsRef.current.map((q) => q.question)
 
-    callAnalyse(aiProvider, chunk, prevTerms, prevQs)
+    callAnalyse(aiProvider, chunk, prevTerms, prevQs, frameBase64)
       .then((result) => {
+        const hasQuestion = result.questions?.length > 0
+        const advance = hasQuestion ? chunk.length : Math.max(2, Math.floor(chunk.length / 2))
+        lastAnalysedRowRef.current = chunkStart + advance - 1
+
         const stamp = { arrivedAt, arrivedStr }
+
         if (result.glossaryTerms?.length) {
           const newItems = result.glossaryTerms.map((g, i) => ({ ...g, id: `g-${Date.now()}-${i}`, ...stamp }))
           liveGlossaryRef.current = [...liveGlossaryRef.current, ...newItems]
@@ -704,17 +953,43 @@ export default function App() {
             ...result.highlights.map((h, i) => ({ ...h, id: `h-${Date.now()}-${i}`, ...stamp })),
           ])
         }
-        if (result.questions?.length) {
+        if (hasQuestion) {
           const newQs = result.questions.map((q, i) => ({ ...q, id: `q-${Date.now()}-${i}`, ...stamp }))
           liveQuestionsRef.current = [...liveQuestionsRef.current, ...newQs]
           setLiveQuestions((prev) => [...prev, ...newQs])
         }
+
+        // Visual regions — show overlays on video, add to Explore Highlights
+        // Only ever show one marker at a time: take the first region from this batch.
+        if (result.regions?.length && videoSourceRef.current === 'local') {
+          const newRegions = result.regions.slice(0, 1).map((reg, i) => ({
+            ...reg,
+            id: `fr-${Date.now()}-${i}`,
+            ...stamp,
+          }))
+          setFrameRegions(newRegions)
+          clearTimeout(frameOverlayTimerRef.current)
+          frameOverlayTimerRef.current = setTimeout(() => setFrameRegions([]), 4000)
+
+          setLiveHighlights((prev) => [
+            ...prev,
+            ...newRegions.map((reg) => ({
+              id: `fh-${reg.id}`,
+              text: `${reg.label}: ${reg.description}`,
+              arrivedAt: reg.arrivedAt,
+              arrivedStr: reg.arrivedStr,
+              regions: [reg],
+            })),
+          ])
+        }
       })
-      .catch((err) => console.warn('[analyse]', err.message))
+      .catch((err) => {
+        lastAnalysedRowRef.current = chunkStart + Math.max(2, Math.floor(chunk.length / 2)) - 1
+        console.warn('[analyse]', err.message)
+      })
       .finally(() => { isAnalysingRef.current = false })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPlaybackSeconds, aiProvider])
-
 
   // ── Event logging ──────────────────────────────────────────────────────────
 
@@ -758,6 +1033,7 @@ export default function App() {
     }
 
     const initPlayer = async () => {
+      if (videoSourceRef.current !== 'youtube') return
       await loadYouTubeIframeApi()
       if (disposed || !playerHostRef.current || !window.YT?.Player) return
 
@@ -816,6 +1092,61 @@ export default function App() {
       playerRef.current = null
     }
   }, [playerKey])
+
+  // ── Local video player ─────────────────────────────────────────────────────
+
+  useEffect(() => {
+    const video = localVideoRef.current
+    if (!video) return
+
+    const onTimeUpdate = () => {
+      if (videoSourceRef.current !== 'local') return
+      const t = video.currentTime
+      if (Number.isFinite(t)) setCurrentPlaybackSeconds(t)
+    }
+    const onLoadedMetadata = () => {
+      if (videoSourceRef.current === 'local') setDuration(video.duration)
+    }
+    const onPlay = () => {
+      if (videoSourceRef.current !== 'local') return
+      isPlayingRef.current = true
+      setIsPlaying(true)
+      logEventRef.current?.('video_play', video.currentTime)
+      if (playerControlsModeRef.current === 'custom') {
+        clearTimeout(controlsTimerRef.current)
+        controlsTimerRef.current = setTimeout(() => setShowControls(false), 3000)
+      }
+    }
+    const onPause = () => {
+      if (videoSourceRef.current !== 'local') return
+      isPlayingRef.current = false
+      setIsPlaying(false)
+      logEventRef.current?.('video_pause', video.currentTime)
+      clearTimeout(controlsTimerRef.current)
+      setShowControls(true)
+    }
+    const onEnded = () => {
+      if (videoSourceRef.current !== 'local') return
+      isPlayingRef.current = false
+      setIsPlaying(false)
+      logEventRef.current?.('video_ended', video.currentTime)
+      setShowControls(true)
+    }
+
+    video.addEventListener('timeupdate', onTimeUpdate)
+    video.addEventListener('loadedmetadata', onLoadedMetadata)
+    video.addEventListener('play', onPlay)
+    video.addEventListener('pause', onPause)
+    video.addEventListener('ended', onEnded)
+
+    return () => {
+      video.removeEventListener('timeupdate', onTimeUpdate)
+      video.removeEventListener('loadedmetadata', onLoadedMetadata)
+      video.removeEventListener('play', onPlay)
+      video.removeEventListener('pause', onPause)
+      video.removeEventListener('ended', onEnded)
+    }
+  }, [])
 
   // ── Transcript auto-scroll ─────────────────────────────────────────────────
 
@@ -986,9 +1317,10 @@ export default function App() {
   const handleExplainAnswer = useCallback((q, selectedIdx, isCorrect) => {
     const chosen = q.options[selectedIdx]
     const correct = q.options[q.correctIndex]
+    const when = q.arrivedStr ? ` (around ${q.arrivedStr})` : ''
     const msg = isCorrect
-      ? `At ${q.timestampStr} I answered this question correctly: "${q.question}" — I chose "${chosen}". Can you explain in simple terms why this is the right answer?`
-      : `At ${q.timestampStr} I answered this question: "${q.question}" — I chose "${chosen}" but the correct answer is "${correct}". Can you explain why "${correct}" is correct and where my thinking went wrong?`
+      ? `I just answered a quiz question${when} correctly.\n\nQuestion: "${q.question}"\nMy answer: "${chosen}" ✓\n\nCan you explain in simple terms why this is correct?`
+      : `I just got a quiz question${when} wrong.\n\nQuestion: "${q.question}"\nMy answer: "${chosen}" ✗\nCorrect answer: "${correct}"\n\nCan you explain why "${correct}" is the right answer and where my thinking went wrong?`
     sendMessage(msg)
   }, [sendMessage])
 
@@ -1008,8 +1340,8 @@ export default function App() {
   }
 
   const resetSession = () => {
-    playerRef.current?.pauseVideo?.()
-    playerRef.current?.seekTo?.(0, true)
+    playerPause()
+    playerSeekTo(0)
     setMessages([])
     setAiError(null)
     setChatInput('')
@@ -1051,10 +1383,12 @@ export default function App() {
   const handleMainScroll = useCallback(() => {
     const el = centerColumnRef.current
     if (!el) return
-    if (!isCompactRef.current && el.scrollTop > 1) {
+    const playerH = playerStageRef.current?.offsetHeight ?? 200
+    const onThreshold = playerH * 0.25
+    if (!isCompactRef.current && el.scrollTop > onThreshold) {
       isCompactRef.current = true
       setIsCompact(true)
-    } else if (isCompactRef.current && el.scrollTop < 1) {
+    } else if (isCompactRef.current && el.scrollTop < 4) {
       isCompactRef.current = false
       setIsCompact(false)
     }
@@ -1066,6 +1400,13 @@ export default function App() {
     userScrollTimerRef.current = setTimeout(() => {
       userScrolledRef.current = false
     }, 4000)
+  }, [])
+
+  // ── Disable scroll anchoring to prevent compact-toggle feedback loop ───────
+
+  useEffect(() => {
+    const el = centerColumnRef.current
+    if (el) el.style.overflowAnchor = 'none'
   }, [])
 
   // ── Sync --feature-row-h to the actual secondary row height ──────────────
@@ -1098,14 +1439,63 @@ export default function App() {
     return () => document.removeEventListener('mousedown', close)
   }, [showSettings])
 
+  // ── Unified player helpers (works for both YouTube and local video) ──────────
+
+  const playerGetTime = () => {
+    if (videoSourceRef.current === 'local') return localVideoRef.current?.currentTime ?? 0
+    return playerRef.current?.getCurrentTime?.() ?? 0
+  }
+
+  const playerPlay = () => {
+    if (videoSourceRef.current === 'local') localVideoRef.current?.play()
+    else playerRef.current?.playVideo?.()
+  }
+
+  const playerPause = () => {
+    if (videoSourceRef.current === 'local') localVideoRef.current?.pause()
+    else playerRef.current?.pauseVideo?.()
+  }
+
+  const playerSeekTo = (t) => {
+    const clamped = Math.max(0, t)
+    if (videoSourceRef.current === 'local') {
+      if (localVideoRef.current) localVideoRef.current.currentTime = clamped
+    } else {
+      playerRef.current?.seekTo?.(clamped, true)
+    }
+    setCurrentPlaybackSeconds(clamped)
+  }
+
+  // ── Switch video source ───────────────────────────────────────────────────
+
+  const switchVideoSource = (next) => {
+    if (next === videoSource) { setShowSettings(false); return }
+    const t = playerGetTime()
+    // Pause whichever player is active
+    if (videoSourceRef.current === 'local') localVideoRef.current?.pause()
+    else playerRef.current?.pauseVideo?.()
+    // Seek the incoming player to the current time
+    if (next === 'local') {
+      if (localVideoRef.current) localVideoRef.current.currentTime = t
+    } else {
+      playerRef.current?.seekTo?.(t, true)
+    }
+    videoSourceRef.current = next
+    setVideoSource(next)
+    setShowSettings(false)
+    setShowControls(true)
+    setIsPlaying(false)
+    isPlayingRef.current = false
+  }
+
   const switchPlayerControls = (next) => {
     if (next === playerControlsMode) { setShowSettings(false); return }
-    savedTimeRef.current = playerRef.current?.getCurrentTime?.() ?? 0
+    savedTimeRef.current = playerGetTime()
     playerControlsModeRef.current = next
     setPlayerControlsMode(next)
     setShowControls(true)
     setShowSettings(false)
-    setPlayerKey((k) => k + 1)
+    if (videoSourceRef.current === 'youtube') setPlayerKey((k) => k + 1)
   }
 
   // ── Custom player controls ────────────────────────────────────────────────
@@ -1124,26 +1514,19 @@ export default function App() {
   }
 
   const togglePlay = () => {
-    const p = playerRef.current
-    if (!p) return
-    isPlayingRef.current ? p.pauseVideo() : p.playVideo()
+    isPlayingRef.current ? playerPause() : playerPlay()
   }
 
   const seekRelative = (delta) => {
-    const p = playerRef.current
-    if (!p) return
-    const t = Math.max(0, (p.getCurrentTime() || 0) + delta)
-    p.seekTo(t, true)
-    setCurrentPlaybackSeconds(t)
+    const t = Math.max(0, playerGetTime() + delta)
+    playerSeekTo(t)
   }
 
   const seekToRatio = (clientX) => {
     const rect = progressRef.current?.getBoundingClientRect()
     if (!rect || !duration) return
     const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
-    const t = ratio * duration
-    setCurrentPlaybackSeconds(t)
-    playerRef.current?.seekTo(t, true)
+    playerSeekTo(ratio * duration)
   }
 
   const handleSeekPointerDown = (e) => {
@@ -1160,24 +1543,45 @@ export default function App() {
   const handleSeekPointerUp = () => { isSeekingRef.current = false }
 
   const handleVolumeChange = (val) => {
-    const p = playerRef.current
-    if (!p) return
     setVolume(val)
-    p.setVolume(val)
-    if (val === 0) { p.mute(); setIsMuted(true) }
-    else if (isMuted) { p.unMute(); setIsMuted(false) }
+    if (videoSourceRef.current === 'local') {
+      const v = localVideoRef.current
+      if (!v) return
+      v.volume = val / 100
+      if (val === 0) { v.muted = true; setIsMuted(true) }
+      else if (isMuted) { v.muted = false; setIsMuted(false) }
+    } else {
+      const p = playerRef.current
+      if (!p) return
+      p.setVolume(val)
+      if (val === 0) { p.mute(); setIsMuted(true) }
+      else if (isMuted) { p.unMute(); setIsMuted(false) }
+    }
   }
 
   const toggleMute = () => {
-    const p = playerRef.current
-    if (!p) return
-    if (isMuted) {
-      p.unMute()
-      setIsMuted(false)
-      if (volume === 0) { setVolume(50); p.setVolume(50) }
+    if (videoSourceRef.current === 'local') {
+      const v = localVideoRef.current
+      if (!v) return
+      if (isMuted) {
+        v.muted = false
+        setIsMuted(false)
+        if (volume === 0) { setVolume(50); v.volume = 0.5 }
+      } else {
+        v.muted = true
+        setIsMuted(true)
+      }
     } else {
-      p.mute()
-      setIsMuted(true)
+      const p = playerRef.current
+      if (!p) return
+      if (isMuted) {
+        p.unMute()
+        setIsMuted(false)
+        if (volume === 0) { setVolume(50); p.setVolume(50) }
+      } else {
+        p.mute()
+        setIsMuted(true)
+      }
     }
   }
 
@@ -1256,7 +1660,30 @@ export default function App() {
 
               {showSettings && (
                 <div ref={settingsPanelRef} className="lp-settings-panel" role="dialog" aria-label="Settings">
-                  <p className="lp-settings-label">Player controls</p>
+                  <p className="lp-settings-label">Video source</p>
+                  <div className="lp-settings-seg">
+                    <button
+                      type="button"
+                      className={`lp-seg-opt${videoSource === 'youtube' ? ' lp-seg-active' : ''}`}
+                      onClick={() => switchVideoSource('youtube')}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="M23 7s-.3-2-1.2-2.8c-1.1-1.2-2.4-1.2-3-1.3C16.1 2.7 12 2.7 12 2.7s-4.1 0-6.8.2c-.6.1-1.9.1-3 1.3C1.3 5 1 7 1 7S.7 9.1.7 11.3v2c0 2.1.3 4.2.3 4.2s.3 2 1.2 2.8c1.1 1.2 2.6 1.1 3.3 1.2C7.3 21.7 12 21.7 12 21.7s4.1 0 6.8-.3c.6-.1 1.9-.1 3-1.3.9-.8 1.2-2.8 1.2-2.8s.3-2.1.3-4.2v-2C23.3 9.1 23 7 23 7zM9.7 15.5V8.2l8.1 3.7-8.1 3.6z"/>
+                      </svg>
+                      YouTube
+                    </button>
+                    <button
+                      type="button"
+                      className={`lp-seg-opt${videoSource === 'local' ? ' lp-seg-active' : ''}`}
+                      onClick={() => switchVideoSource('local')}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                      Local
+                    </button>
+                  </div>
+                  <p className="lp-settings-label" style={{ marginTop: 12 }}>Player controls</p>
                   <div className="lp-settings-seg">
                     <button
                       type="button"
@@ -1302,7 +1729,39 @@ export default function App() {
                 onMouseMove={handleStageMouseMove}
                 onMouseLeave={handleStageMouseLeave}
               >
-                <div ref={playerHostRef} className="lp-youtube-player" />
+                {/* Both players always in DOM — toggled via visibility */}
+                <div
+                  ref={playerHostRef}
+                  className="lp-youtube-player"
+                  style={{ display: videoSource === 'youtube' ? 'block' : 'none' }}
+                />
+                <video
+                  ref={localVideoRef}
+                  src="/neural-networks.mp4"
+                  className="lp-youtube-player"
+                  style={{
+                    display: videoSource === 'local' ? 'block' : 'none',
+                    objectFit: 'contain',
+                    background: '#000',
+                  }}
+                />
+                <canvas ref={canvasRef} style={{ display: 'none' }} />
+
+                {/* Frame highlight dots — local mode only, centered on each region */}
+                {videoSource === 'local' && frameRegions.map((reg) => (
+                  <FrameDot
+                    key={reg.id}
+                    reg={reg}
+                    onAsk={() => sendMessage(`At ${reg.arrivedStr}, I noticed this on screen: "${reg.label}" — ${reg.description}. Can you explain this in more detail?`)}
+                    onOpen={() => {
+                      playerPause()
+                      clearTimeout(frameOverlayTimerRef.current)
+                    }}
+                    onClose={() => {
+                      frameOverlayTimerRef.current = setTimeout(() => setFrameRegions([]), 2500)
+                    }}
+                  />
+                ))}
 
                 {/* Transparent overlay — routes clicks to togglePlay, custom mode only */}
                 {playerControlsMode === 'custom' && (
@@ -1412,7 +1871,11 @@ export default function App() {
                                 className={`lp-speed-opt${playbackRate === r ? ' lp-speed-current' : ''}`}
                                 onClick={(e) => {
                                   e.stopPropagation()
-                                  playerRef.current?.setPlaybackRate(r)
+                                  if (videoSourceRef.current === 'local') {
+                                    if (localVideoRef.current) localVideoRef.current.playbackRate = r
+                                  } else {
+                                    playerRef.current?.setPlaybackRate(r)
+                                  }
                                   setPlaybackRate(r)
                                   setShowSpeedMenu(false)
                                 }}
@@ -1447,11 +1910,16 @@ export default function App() {
               <Highlights
                 currentSeconds={currentPlaybackSeconds}
                 onSeek={(t) => {
-                  playerRef.current?.seekTo?.(t, true)
-                  playerRef.current?.playVideo?.()
-                  setCurrentPlaybackSeconds(t)
+                  playerSeekTo(t)
+                  playerPlay()
                 }}
+                onPause={playerPause}
                 onDetailClick={handleHighlightDetail}
+                onShowRegions={(regs) => {
+                  setFrameRegions(regs)
+                  clearTimeout(frameOverlayTimerRef.current)
+                  frameOverlayTimerRef.current = setTimeout(() => setFrameRegions([]), 4000)
+                }}
                 items={liveHighlights}
               />
               <LiveQuestionFeed
@@ -1482,9 +1950,8 @@ export default function App() {
                     ref={(node) => setTranscriptItemRef(row.id, node)}
                     className={`lp-transcript-item${activeTranscriptId === row.id ? ' lp-active' : ''}`}
                     onClick={() => {
-                      playerRef.current?.seekTo?.(row.seconds, true)
-                      playerRef.current?.playVideo?.()
-                      setCurrentPlaybackSeconds(row.seconds)
+                      playerSeekTo(row.seconds)
+                      playerPlay()
                     }}
                   >
                     <span className="lp-transcript-time">{row.time}</span>
@@ -1567,7 +2034,9 @@ export default function App() {
                         </div>
                       ) : (
                         <div key={i} className="lp-flow-assistant">
-                          <p>{msg.content}</p>
+                          <div className="lp-flow-assistant--md">
+                            <ReactMarkdown>{msg.content}</ReactMarkdown>
+                          </div>
                         </div>
                       )
                     )}

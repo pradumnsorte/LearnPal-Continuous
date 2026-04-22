@@ -121,11 +121,11 @@ const callAI = async (provider, messages, currentSeconds, sessionId = null, quiz
 
 // ─── Live analysis ────────────────────────────────────────────────────────────
 
-const callAnalyse = async (provider, chunk, previousTerms, previousQuestions, frameBase64 = null) => {
+const callAnalyse = async (provider, chunk, previousTerms, previousQuestions, frameBase64 = null, previousHighlights = []) => {
   const res = await fetch('/api/analyse', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ provider, chunk, previousTerms, previousQuestions, frameBase64 }),
+    body: JSON.stringify({ provider, chunk, previousTerms, previousQuestions, frameBase64, previousHighlights }),
   })
   if (!res.ok) throw new Error(`Analyse error ${res.status}`)
   return res.json()
@@ -311,7 +311,7 @@ function Glossary({ currentSeconds, aiProvider, onCycleProvider, items = [] }) {
 
 // ─── Frame dot overlay (concentric marker on video) ──────────────────────────
 
-function FrameDot({ reg, onAsk, onOpen, onClose }) {
+function FrameDot({ reg, videoBounds, onAsk, onOpen, onClose }) {
   const [open, setOpen] = useState(false)
   const dotRef = useRef(null)
 
@@ -334,7 +334,10 @@ function FrameDot({ reg, onAsk, onOpen, onClose }) {
     <div
       ref={dotRef}
       className={`lp-frame-dot${open ? ' lp-frame-dot--open' : ''}`}
-      style={{ left: `${reg.x + reg.width / 2}%`, top: `${reg.y + reg.height / 2}%` }}
+      style={{
+        left: `${videoBounds.left + (reg.x + reg.width  / 2) / 100 * videoBounds.width}%`,
+        top:  `${videoBounds.top  + (reg.y + reg.height / 2) / 100 * videoBounds.height}%`,
+      }}
       onClick={toggle}
     >
       <span className="lp-frame-dot-core" />
@@ -391,8 +394,8 @@ function Highlights({ currentSeconds, onSeek, onPause, onDetailClick, onShowRegi
       const added = visible.slice(prevCountRef.current).map((h) => h.id)
       setNewIds(new Set(added))
       const timer = setTimeout(() => setNewIds(new Set()), 1200)
-      // Only promote to featured if there's no current featured being shown
-      setFeaturedId(prev => prev ?? added[added.length - 1])
+      // Always promote the newest AI-generated highlight to featured
+      setFeaturedId(added[added.length - 1])
       prevCountRef.current = visible.length
       return () => clearTimeout(timer)
     }
@@ -846,6 +849,7 @@ export default function App() {
   const [showSettings, setShowSettings]   = useState(false)
   const [playerKey, setPlayerKey]         = useState(0)
   const [videoSource, setVideoSource]     = useState('local') // 'youtube' | 'local'
+  const [videoBounds, setVideoBounds]     = useState({ left: 0, top: 0, width: 100, height: 100 }) // % within stage
 
   // AI / session state
   const [aiProvider, setAiProvider] = useState(PROVIDERS.AZURE)
@@ -883,6 +887,7 @@ export default function App() {
   const isAnalysingRef          = useRef(false)
   const liveGlossaryRef         = useRef([])
   const liveQuestionsRef        = useRef([])
+  const liveHighlightsRef       = useRef([])
   const frameOverlayTimerRef    = useRef(null)
 
   // ── Session creation ───────────────────────────────────────────────────────
@@ -896,6 +901,41 @@ export default function App() {
       .then((r) => r.json())
       .then((data) => setSessionId(data.id))
       .catch(() => {})
+  }, [])
+
+  // ── Video content bounds — maps region coords (% of frame) to stage coords ──
+  // The stage may not be 16:9 (compact mode shrinks height while width stays
+  // fixed), so object-fit:contain letterboxes the video. We measure the stage
+  // and compute where the actual video pixels land within it.
+  useEffect(() => {
+    const stage = playerStageRef.current
+    if (!stage) return
+    const VIDEO_ASPECT = 16 / 9 // capture canvas is always 480×270
+    const compute = () => {
+      const sw = stage.offsetWidth
+      const sh = stage.offsetHeight
+      if (!sw || !sh) return
+      const stageAspect = sw / sh
+      let vw, vh, vl, vt
+      if (stageAspect > VIDEO_ASPECT) {
+        // Stage wider than video — pillarbox (black bars left/right)
+        vh = sh
+        vw = sh * VIDEO_ASPECT
+        vl = (sw - vw) / 2
+        vt = 0
+      } else {
+        // Stage taller than video — letterbox (black bars top/bottom)
+        vw = sw
+        vh = sw / VIDEO_ASPECT
+        vl = 0
+        vt = (sh - vh) / 2
+      }
+      setVideoBounds({ left: vl / sw * 100, top: vt / sh * 100, width: vw / sw * 100, height: vh / sh * 100 })
+    }
+    compute()
+    const ro = new ResizeObserver(compute)
+    ro.observe(stage)
+    return () => ro.disconnect()
   }, [])
 
   // ── Unified live analysis — transcript chunk + optional video frame ────────
@@ -931,10 +971,11 @@ export default function App() {
 
     const arrivedAt = currentPlaybackSeconds
     const arrivedStr = formatTime(arrivedAt)
-    const prevTerms = liveGlossaryRef.current.map((g) => g.term)
-    const prevQs    = liveQuestionsRef.current.map((q) => q.question)
+    const prevTerms      = liveGlossaryRef.current.map((g) => g.term)
+    const prevQs         = liveQuestionsRef.current.map((q) => q.question)
+    const prevHighlights = liveHighlightsRef.current.map((h) => h.text)
 
-    callAnalyse(aiProvider, chunk, prevTerms, prevQs, frameBase64)
+    callAnalyse(aiProvider, chunk, prevTerms, prevQs, frameBase64, prevHighlights)
       .then((result) => {
         const hasQuestion = result.questions?.length > 0
         const advance = hasQuestion ? chunk.length : Math.max(2, Math.floor(chunk.length / 2))
@@ -948,10 +989,9 @@ export default function App() {
           setLiveGlossary((prev) => [...prev, ...newItems])
         }
         if (result.highlights?.length) {
-          setLiveHighlights((prev) => [
-            ...prev,
-            ...result.highlights.map((h, i) => ({ ...h, id: `h-${Date.now()}-${i}`, ...stamp })),
-          ])
+          const newHighlights = result.highlights.map((h, i) => ({ ...h, id: `h-${Date.now()}-${i}`, ...stamp }))
+          liveHighlightsRef.current = [...liveHighlightsRef.current, ...newHighlights]
+          setLiveHighlights((prev) => [...prev, ...newHighlights])
         }
         if (hasQuestion) {
           const newQs = result.questions.map((q, i) => ({ ...q, id: `q-${Date.now()}-${i}`, ...stamp }))
@@ -1752,6 +1792,7 @@ export default function App() {
                   <FrameDot
                     key={reg.id}
                     reg={reg}
+                    videoBounds={videoBounds}
                     onAsk={() => sendMessage(`At ${reg.arrivedStr}, I noticed this on screen: "${reg.label}" — ${reg.description}. Can you explain this in more detail?`)}
                     onOpen={() => {
                       playerPause()

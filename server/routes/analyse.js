@@ -130,7 +130,7 @@ const callProvider = async (provider, systemPrompt, userPrompt, frameBase64 = nu
 // ── Route ─────────────────────────────────────────────────────────────────────
 
 router.post('/', async (req, res) => {
-  const { provider, chunk, previousTerms = [], previousQuestions = [], frameBase64 = null } = req.body
+  const { provider, chunk, previousTerms = [], previousQuestions = [], previousHighlights = [], frameBase64 = null } = req.body
 
   if (!provider || !Array.isArray(chunk) || chunk.length === 0) {
     return res.status(400).json({ error: 'provider and chunk are required' })
@@ -145,6 +145,10 @@ router.post('/', async (req, res) => {
 
   const prevQsLine = previousQuestions.length > 0
     ? `\nDo NOT repeat or closely resemble these already-asked questions:\n${previousQuestions.map((q, i) => `${i + 1}. ${q}`).join('\n')}`
+    : ''
+
+  const prevHighlightsLine = previousHighlights.length > 0
+    ? `\nDo NOT generate a highlight that covers the same visual scene or concept as any of these already-generated highlights:\n${previousHighlights.map((h, i) => `${i + 1}. ${h}`).join('\n')}`
     : ''
 
   const systemPrompt = `You are an AI learning assistant analysing an educational video about neural networks. You generate structured support content from transcript chunks and (when attached) the current video frame.
@@ -170,6 +174,7 @@ Be conservative. Empty arrays are BETTER than redundant, obvious, or low-value c
 ${chunkText}
 ${prevTermsLine}
 ${prevQsLine}
+${prevHighlightsLine}
 ${hasImage ? '\nA video frame captured at this moment is attached. Examine it carefully before producing regions/highlights.' : ''}
 
 Return ONLY this JSON structure:
@@ -190,13 +195,15 @@ Rules:
 
 - ${regionsRule}
 
-- highlights: WHOLE-SCENE visual compositions only — use VERY sparingly (0 per chunk most of the time; at most 1). Fire ONLY when pausing and examining the entire current visual as a complete unit would meaningfully help learning: e.g., a full neural network diagram has just been revealed, a multi-step equation is written out on screen, a comparison chart with multiple labelled parts is being shown. Each highlight is 1 sentence describing what the overall scene shows and why the whole composition matters. DO NOT emit a highlight for:
+- highlights: WHOLE-SCENE visual compositions only — use EXTREMELY sparingly (expect 0 per chunk; at most 1 across several chunks). A highlight is only valid when ALL of these are true: (1) the current frame shows a visually distinct new composition not seen before in this session, (2) pausing to examine the entire scene as a unit would meaningfully help learning, (3) the scene has substantially changed from anything already highlighted. Valid examples: a complete multi-layer neural network diagram newly revealed on screen, a full comparison table with multiple labelled columns, a step-by-step equation written out in full. DO NOT emit a highlight for:
+  • Any scene that is visually similar to an already-generated highlight
   • New terminology or concept introductions  → that belongs in glossaryTerms
   • A single visible object or diagram part    → that belongs in regions
-  • Spoken explanation without a visual anchor
-  • Recaps, motivations, transitions, summaries, or general statements
+  • Spoken explanation without a distinct visual anchor
+  • Recaps, transitions, summaries, motivational statements
   • Anything already captured by a region in this same response
-  When in doubt, return [].
+  • Incremental changes to an already-highlighted diagram (more nodes added, labels changed, etc.)
+  Ask yourself: "Would a learner who paused here see something genuinely new and worth studying as a whole?" If not, return []. When in doubt, return [].
 
 - questions: Only if this chunk introduces or explains a concept worth testing. The question must make the learner THINK and apply understanding — not recall a specific phrase or number from the video. Ask "why does this work?", "what would happen if…?", "which of these is an example of X?" style questions. Never ask "what did the speaker say about Y?" or test verbatim facts. 4 options, correctIndex 0-based, difficulty 1=Conceptual 2=Applied 3=Creative. Skip if the chunk is a transition, recap, or has no substantial concept worth reasoning about.
 

@@ -16,6 +16,7 @@ db.exec(`
     video_id       TEXT    NOT NULL,
     video_title    TEXT    NOT NULL,
     participant_id TEXT,
+    paradigm       TEXT,
     created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -25,6 +26,7 @@ db.exec(`
     role        TEXT    NOT NULL CHECK(role IN ('user', 'assistant')),
     content     TEXT    NOT NULL,
     provider    TEXT,
+    source      TEXT,
     created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -59,8 +61,30 @@ db.exec(`
     session_id       INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     event_type       TEXT    NOT NULL,
     playback_seconds REAL,
+    meta             TEXT,
     created_at       TEXT    NOT NULL DEFAULT (datetime('now'))
   );
 `)
+
+// Auto-migrations for older databases that pre-date these columns.
+const eventCols = db.prepare("PRAGMA table_info(events)").all().map((c) => c.name)
+if (!eventCols.includes('meta')) {
+  db.exec('ALTER TABLE events ADD COLUMN meta TEXT')
+}
+
+const quizCols = db.prepare("PRAGMA table_info(quiz_attempts)").all().map((c) => c.name)
+if (!quizCols.includes('time_to_answer_seconds')) {
+  db.exec('ALTER TABLE quiz_attempts ADD COLUMN time_to_answer_seconds REAL')
+}
+
+const sessionCols = db.prepare("PRAGMA table_info(sessions)").all().map((c) => c.name)
+if (!sessionCols.includes('paradigm')) {
+  db.exec('ALTER TABLE sessions ADD COLUMN paradigm TEXT')
+}
+
+const messageCols = db.prepare("PRAGMA table_info(messages)").all().map((c) => c.name)
+if (!messageCols.includes('source')) {
+  db.exec('ALTER TABLE messages ADD COLUMN source TEXT')
+}
 
 export default db

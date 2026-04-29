@@ -105,12 +105,12 @@ Format your responses using markdown: use **bold** for key terms, bullet points 
 
 // ─── AI chat ─────────────────────────────────────────────────────────────────
 
-const callAI = async (provider, messages, currentSeconds, sessionId = null, quizHistory = []) => {
+const callAI = async (provider, messages, currentSeconds, sessionId = null, quizHistory = [], source = 'chat') => {
   const systemPrompt = buildSystemPrompt(currentSeconds, quizHistory, messages)
   const res = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ provider, messages, systemPrompt, sessionId }),
+    body: JSON.stringify({ provider, messages, systemPrompt, sessionId, source }),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
@@ -522,7 +522,7 @@ function Highlights({ currentSeconds, onSeek, onPause, onDetailClick, onShowRegi
 
 // ─── Live Question Feed ───────────────────────────────────────────────────────
 
-function LiveQuestionFeed({ currentSeconds, onAnswered, onExplainAnswer, quizDifficulty, setQuizDifficulty, consecutiveCorrect, setConsecutiveCorrect, items = [] }) {
+function LiveQuestionFeed({ currentSeconds, onAnswered, onExplainAnswer, quizDifficulty, setQuizDifficulty, consecutiveCorrect, setConsecutiveCorrect, items = [], logEvent = () => {} }) {
   const [isPaused, setIsPaused] = useState(false)
   const [frozenAt, setFrozenAt] = useState(null)
   const [answers, setAnswers] = useState({})
@@ -533,6 +533,10 @@ function LiveQuestionFeed({ currentSeconds, onAnswered, onExplainAnswer, quizDif
   const [tipOpen, setTipOpen] = useState(false)
   const tipRef = useRef(null)
   const optionLabels = ['A', 'B', 'C', 'D']
+
+  // Tracks when each visible question first became "active" so we can
+  // measure how long the user spent before submitting.
+  const shownAtRef = useRef({})
 
   useEffect(() => {
     if (!tipOpen) return
@@ -557,6 +561,11 @@ function LiveQuestionFeed({ currentSeconds, onAnswered, onExplainAnswer, quizDif
     if (unlocked.length > prevCountRef.current) {
       const added = unlocked.slice(prevCountRef.current).map((q) => q.id)
       setNewIds(new Set(added))
+      // Stamp shown-at for each newly unlocked question and log the unlock
+      added.forEach((id) => {
+        if (!shownAtRef.current[id]) shownAtRef.current[id] = Date.now()
+        logEvent('feed_question_unlocked', currentSeconds, { question_id: id })
+      })
       const timer = setTimeout(() => setNewIds(new Set()), 1500)
       if (!userNavigatedRef.current) setCurrentIdx(unlocked.length - 1)
       prevCountRef.current = unlocked.length
@@ -566,8 +575,13 @@ function LiveQuestionFeed({ currentSeconds, onAnswered, onExplainAnswer, quizDif
   }, [unlocked.length])
 
   const togglePause = () => {
-    if (!isPaused) { setFrozenAt(currentSeconds); setIsPaused(true) }
-    else { setFrozenAt(null); setIsPaused(false) }
+    if (!isPaused) {
+      logEvent('feed_paused', currentSeconds)
+      setFrozenAt(currentSeconds); setIsPaused(true)
+    } else {
+      logEvent('feed_resumed', currentSeconds)
+      setFrozenAt(null); setIsPaused(false)
+    }
   }
 
   const selectOption = (qid, idx) => {
@@ -582,7 +596,9 @@ function LiveQuestionFeed({ currentSeconds, onAnswered, onExplainAnswer, quizDif
     if (!state || state.selected === null || state.selected === undefined || state.submitted) return
     const isCorrect = state.selected === q.correctIndex
     setAnswers((prev) => ({ ...prev, [q.id]: { ...prev[q.id], submitted: true, isCorrect } }))
-    onAnswered(q, isCorrect)
+    const startedAt = shownAtRef.current[q.id]
+    const timeToAnswerSeconds = startedAt ? (Date.now() - startedAt) / 1000 : null
+    onAnswered(q, isCorrect, state.selected, timeToAnswerSeconds)
     if (isCorrect) {
       const streak = consecutiveCorrect + 1
       if (streak >= 2 && quizDifficulty < 3) { setQuizDifficulty(quizDifficulty + 1); setConsecutiveCorrect(0) }
@@ -594,6 +610,7 @@ function LiveQuestionFeed({ currentSeconds, onAnswered, onExplainAnswer, quizDif
   }
 
   const skipQuestion = (qid) => {
+    logEvent('feed_question_skipped', currentSeconds, { question_id: qid })
     setAnswers((prev) => ({ ...prev, [qid]: { ...prev[qid], skipped: true } }))
   }
 
@@ -625,6 +642,7 @@ function LiveQuestionFeed({ currentSeconds, onAnswered, onExplainAnswer, quizDif
   }
 
   const jumpTo = (i) => {
+    logEvent('feed_question_jumped', currentSeconds, { question_index: i })
     setCurrentIdx(i)
     userNavigatedRef.current = i !== unlocked.length - 1
   }
@@ -837,6 +855,7 @@ export default function App() {
   const transcriptItemRefs = useRef(new Map())
   const userScrolledRef    = useRef(false)
   const userScrollTimerRef = useRef(null)
+  const modalQuizShownAtRef = useRef(null)   // ms timestamp when modal quiz question landed
 
   // Chat scroll ref
   const chatBottomRef = useRef(null)
@@ -869,7 +888,7 @@ export default function App() {
   const [videoBounds, setVideoBounds]     = useState({ left: 0, top: 0, width: 100, height: 100 }) // % within stage
 
   // AI / session state
-  const [aiProvider, setAiProvider] = useState(PROVIDERS.AZURE)
+  const [aiProvider, setAiProvider] = useState(PROVIDERS.AZURE_54)
   const [sessionId, setSessionId]   = useState(null)
   const [participantId, setParticipantId] = useState('')
 
@@ -914,7 +933,7 @@ export default function App() {
     fetch('/api/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ videoId: VIDEO_ID, videoTitle: 'The Essential Main Ideas of Neural Networks' }),
+      body: JSON.stringify({ videoId: VIDEO_ID, videoTitle: 'The Essential Main Ideas of Neural Networks', paradigm: 'continuous' }),
     })
       .then((r) => r.json())
       .then((data) => setSessionId(data.id))
@@ -1052,9 +1071,9 @@ export default function App() {
 
   // ── Event logging ──────────────────────────────────────────────────────────
 
-  const logEvent = useCallback((eventType, playbackSeconds = null) => {
+  const logEvent = useCallback((eventType, playbackSeconds = null, meta = null) => {
     if (!sessionId) return
-    const body = JSON.stringify({ sessionId, eventType, playbackSeconds })
+    const body = JSON.stringify({ sessionId, eventType, playbackSeconds, meta })
     if (eventType === 'session_end') {
       navigator.sendBeacon('/api/events', new Blob([body], { type: 'application/json' }))
     } else {
@@ -1074,6 +1093,16 @@ export default function App() {
     }
     window.addEventListener('beforeunload', handleUnload)
     return () => window.removeEventListener('beforeunload', handleUnload)
+  }, [logEvent])
+
+  // Tab focus / blur — engagement signal
+  useEffect(() => {
+    const onVisibility = () => {
+      const pos = playerRef.current?.getCurrentTime?.() ?? 0
+      logEvent(document.hidden ? 'tab_blurred' : 'tab_focused', pos)
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
   }, [logEvent])
 
   // ── YouTube player ─────────────────────────────────────────────────────────
@@ -1251,7 +1280,7 @@ export default function App() {
 
   // ── Chat ───────────────────────────────────────────────────────────────────
 
-  const sendMessage = useCallback(async (content) => {
+  const sendMessage = useCallback(async (content, source = 'chat') => {
     const clean = content.trim()
     if (!clean || isLoading) return
 
@@ -1267,13 +1296,16 @@ export default function App() {
       logEvent('first_interaction', currentPlaybackSeconds)
     }
 
+    logEvent('chat_message_sent', currentPlaybackSeconds, { char_count: clean.length, source })
+
     try {
       const reply = await callAI(
         aiProvider,
         updated.map(({ role, content: c }) => ({ role, content: c })),
         currentPlaybackSeconds,
         sessionId,
-        quizHistory
+        quizHistory,
+        source,
       )
       setMessages((prev) => [...prev, { role: 'assistant', content: reply }])
     } catch (err) {
@@ -1295,6 +1327,7 @@ export default function App() {
       const q = await generateQuizQuestion(aiProvider, currentPlaybackSeconds, prevQuestions, quizDifficulty)
       setCurrentQuiz(q)
       setAskedQuestions((prev) => [...prev, q.question])
+      modalQuizShownAtRef.current = Date.now()
     } catch (err) {
       setQuizError(err.message)
     } finally {
@@ -1306,6 +1339,10 @@ export default function App() {
     if (selectedOption === null) return
     setQuizFeedback(true)
     const isCorrect = selectedOption === currentQuiz.correctIndex
+    const timeToAnswerSeconds = modalQuizShownAtRef.current
+      ? (Date.now() - modalQuizShownAtRef.current) / 1000
+      : null
+    modalQuizShownAtRef.current = null
     setQuizHistory((prev) => [...prev, { question: currentQuiz.question, isCorrect }])
     if (isCorrect) {
       const newStreak = consecutiveCorrect + 1
@@ -1333,6 +1370,7 @@ export default function App() {
           isCorrect,
           difficulty: quizDifficulty,
           provider: aiProvider,
+          timeToAnswerSeconds,
         }),
       }).catch(() => {})
     }
@@ -1340,7 +1378,7 @@ export default function App() {
 
   // ── Live Question Feed handler ────────────────────────────────────────────
 
-  const handleFeedAnswered = useCallback((q, isCorrect) => {
+  const handleFeedAnswered = useCallback((q, isCorrect, selectedIndex = null, timeToAnswerSeconds = null) => {
     setQuizHistory((prev) => [...prev, { question: q.question, isCorrect }])
     if (sessionId) {
       fetch('/api/quiz/submit', {
@@ -1351,13 +1389,17 @@ export default function App() {
           question: q.question,
           options: q.options,
           correctIndex: q.correctIndex,
-          selectedIndex: null,
+          selectedIndex,
           isCorrect,
           difficulty: q.difficulty,
           provider: aiProvider,
+          timeToAnswerSeconds,
         }),
       }).catch(() => {})
     }
+    logEvent('feed_question_answered', currentPlaybackSeconds, {
+      question_id: q.id, isCorrect, difficulty: q.difficulty, time_to_answer_seconds: timeToAnswerSeconds,
+    })
     if (!firstInteractionLoggedRef.current) {
       firstInteractionLoggedRef.current = true
       logEvent('first_interaction', currentPlaybackSeconds)
@@ -1367,24 +1409,31 @@ export default function App() {
   // ── Highlight Detail → Chat ───────────────────────────────────────────────
 
   const handleHighlightDetail = useCallback((h) => {
+    logEvent('highlight_detail_clicked', currentPlaybackSeconds, {
+      highlight_id: h.id, timestamp_seconds: h.timestampSeconds,
+    })
     const msg = `I'm watching at ${h.timestampStr} and want a deeper explanation of this concept from the video: "${h.text}" — can you explain it in detail with a simple real-life example?`
-    sendMessage(msg)
-  }, [sendMessage])
+    sendMessage(msg, 'highlight_detail')
+  }, [sendMessage, logEvent, currentPlaybackSeconds])
 
   // ── Explain Answer → Chat ─────────────────────────────────────────────────
 
   const handleExplainAnswer = useCallback((q, selectedIdx, isCorrect) => {
+    logEvent('explain_answer_clicked', currentPlaybackSeconds, {
+      question_id: q.id, isCorrect,
+    })
     const chosen = q.options[selectedIdx]
     const correct = q.options[q.correctIndex]
     const when = q.arrivedStr ? ` (around ${q.arrivedStr})` : ''
     const msg = isCorrect
       ? `I just answered a quiz question${when} correctly.\n\nQuestion: "${q.question}"\nMy answer: "${chosen}" ✓\n\nCan you explain in simple terms why this is correct?`
       : `I just got a quiz question${when} wrong.\n\nQuestion: "${q.question}"\nMy answer: "${chosen}" ✗\nCorrect answer: "${correct}"\n\nCan you explain why "${correct}" is the right answer and where my thinking went wrong?`
-    sendMessage(msg)
-  }, [sendMessage])
+    sendMessage(msg, 'quiz_explain')
+  }, [sendMessage, logEvent, currentPlaybackSeconds])
 
   const submitQuickSuggestion = (text) => {
-    sendMessage(text)
+    logEvent('chat_suggestion_clicked', currentPlaybackSeconds, { suggestion: text })
+    sendMessage(text, 'chat_suggestion')
   }
 
   // ── Researcher controls ────────────────────────────────────────────────────
@@ -1420,7 +1469,7 @@ export default function App() {
     fetch('/api/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ videoId: VIDEO_ID, videoTitle: 'The Essential Main Ideas of Neural Networks' }),
+      body: JSON.stringify({ videoId: VIDEO_ID, videoTitle: 'The Essential Main Ideas of Neural Networks', paradigm: 'continuous' }),
     })
       .then((r) => r.json())
       .then((data) => setSessionId(data.id))
@@ -1577,15 +1626,22 @@ export default function App() {
   }
 
   const seekRelative = (delta) => {
-    const t = Math.max(0, playerGetTime() + delta)
+    const from = playerGetTime()
+    const t = Math.max(0, from + delta)
     playerSeekTo(t)
+    logEvent('video_seek', from, { to_seconds: t, delta, source: 'button' })
   }
 
   const seekToRatio = (clientX) => {
     const rect = progressRef.current?.getBoundingClientRect()
     if (!rect || !duration) return
     const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
-    playerSeekTo(ratio * duration)
+    const t = ratio * duration
+    const from = playerGetTime()
+    playerSeekTo(t)
+    if (Math.abs(t - from) > 1.5) {
+      logEvent('video_seek', from, { to_seconds: t, delta: t - from, source: 'scrubber' })
+    }
   }
 
   const handleSeekPointerDown = (e) => {
@@ -1991,6 +2047,7 @@ export default function App() {
                 consecutiveCorrect={feedConsecCorrect}
                 setConsecutiveCorrect={setFeedConsecCorrect}
                 items={liveQuestions}
+                logEvent={logEvent}
               />
             </div>
 
@@ -2010,6 +2067,7 @@ export default function App() {
                     ref={(node) => setTranscriptItemRef(row.id, node)}
                     className={`lp-transcript-item${activeTranscriptId === row.id ? ' lp-active' : ''}`}
                     onClick={() => {
+                      logEvent('transcript_clicked', currentPlaybackSeconds, { to_seconds: row.seconds })
                       playerSeekTo(row.seconds)
                       playerPlay()
                     }}
@@ -2038,7 +2096,9 @@ export default function App() {
                   setAnalyseError(null)
                   setAiProvider((p) => {
                     const idx = PROVIDER_CYCLE.indexOf(p)
-                    return PROVIDER_CYCLE[(idx + 1) % PROVIDER_CYCLE.length]
+                    const next = PROVIDER_CYCLE[(idx + 1) % PROVIDER_CYCLE.length]
+                    logEvent('provider_switched', currentPlaybackSeconds, { from: p, to: next })
+                    return next
                   })
                 }}
                 items={liveGlossary}
@@ -2162,8 +2222,8 @@ export default function App() {
         <button type="button" className="lp-researcher-reset" onClick={resetSession}>
           Reset
         </button>
-        <a className="lp-researcher-export" href="/api/export" target="_blank" rel="noreferrer">
-          Export CSV
+        <a className="lp-researcher-export" href="/api/export/all" target="_blank" rel="noreferrer">
+          Export Excel
         </a>
       </div>
 

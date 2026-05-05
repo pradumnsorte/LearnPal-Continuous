@@ -130,7 +130,7 @@ const callProvider = async (provider, systemPrompt, userPrompt, frameBase64 = nu
 // ── Route ─────────────────────────────────────────────────────────────────────
 
 router.post('/', async (req, res) => {
-  const { provider, chunk, previousTerms = [], previousQuestions = [], previousHighlights = [], frameBase64 = null } = req.body
+  const { provider, chunk, previousTerms = [], previousQuestions = [], previousHighlights = [], frameBase64 = null, chatContext = '' } = req.body
 
   if (!provider || !Array.isArray(chunk) || chunk.length === 0) {
     return res.status(400).json({ error: 'provider and chunk are required' })
@@ -141,6 +141,10 @@ router.post('/', async (req, res) => {
 
   const prevTermsLine = previousTerms.length > 0
     ? `\nDo NOT repeat these already-identified terms: ${previousTerms.join(', ')}.`
+    : ''
+
+  const chatContextLine = chatContext
+    ? `\nThe learner has been asking about: ${chatContext} — avoid surfacing terms or highlights that simply re-explain those topics.`
     : ''
 
   const prevQsLine = previousQuestions.length > 0
@@ -175,6 +179,7 @@ ${chunkText}
 ${prevTermsLine}
 ${prevQsLine}
 ${prevHighlightsLine}
+${chatContextLine}
 ${hasImage ? '\nA video frame captured at this moment is attached. Examine it carefully before producing regions/highlights.' : ''}
 
 Return ONLY this JSON structure:
@@ -184,14 +189,22 @@ Return ONLY this JSON structure:
   "questions": [{
     "question": "...",
     "options": ["...", "...", "...", "..."],
-    "correctIndex": 0,
+    "correctIndex": <integer 0-3>,
     "explanation": "...",
     "difficulty": 1
   }]${regionsSchema}
 }
 
 Rules:
-- glossaryTerms: 1–3 technically new or difficult terms first introduced in THIS chunk. Plain-English definition, 1 sentence each. Skip terms that are obvious from context or that a learner would already know.
+- glossaryTerms: 0–2 NEW NEURAL-NETWORK / MACHINE-LEARNING technical concepts introduced in THIS chunk. Plain-English definition, 1 sentence each.
+  WHITELIST examples (the kind of thing that IS a valid term): activation function, sigmoid, weight, bias, node, neural network, parameter, gradient descent, backpropagation, training data, input layer, hidden layer, output layer, neuron, regression, fitting, sum-of-squared-residuals, softplus.
+  STRICTLY EXCLUDED — never emit any of these or anything like them:
+    · Surface analogy words used as illustrative wrapper for the math (this video uses a drug-dosage analogy → NEVER surface: dosage, efficacy, drug, treatment, medicine, drug response, dose-response, low dose, high dose).
+    · Generic English nouns/adjectives that a non-technical adult already knows: graph, line, curve, axis, value, number, equation, point, dot, label, box, arrow, diagram, sketch, notation, insight, summary, range, scale, amount, output, input box, dosage input, efficacy axis, fancy graph, blue curve, yellow dot.
+    · Concrete on-screen visual elements (those belong in regions, not glossaryTerms).
+    · Any term already in the "do not repeat" list (case-insensitive match).
+  RULE OF THUMB: if a smart 12-year-old already knows what the word means in everyday English, it is NOT a glossary term — even if the speaker just used it. Only surface terms whose technical/ML meaning is non-obvious from common usage.
+  Better to return [] than to surface a weak term.
 
 - ${regionsRule}
 
@@ -205,7 +218,8 @@ Rules:
   • Incremental changes to an already-highlighted diagram (more nodes added, labels changed, etc.)
   Ask yourself: "Would a learner who paused here see something genuinely new and worth studying as a whole?" If not, return []. When in doubt, return [].
 
-- questions: Only if this chunk introduces or explains a concept worth testing. The question must make the learner THINK and apply understanding — not recall a specific phrase or number from the video. Ask "why does this work?", "what would happen if…?", "which of these is an example of X?" style questions. Never ask "what did the speaker say about Y?" or test verbatim facts. 4 options, correctIndex 0-based, difficulty 1=Conceptual 2=Applied 3=Creative. Skip if the chunk is a transition, recap, or has no substantial concept worth reasoning about.
+- questions: Only if this chunk introduces or explains a concept worth testing. The question must make the learner THINK and apply understanding — not recall a specific phrase or number from the video. Ask "why does this work?", "what would happen if…?", "which of these is an example of X?" style questions. Never ask "what did the speaker say about Y?" or test verbatim facts. 4 options, correctIndex 0-based — vary which position is correct (option order is randomised after generation, so DO NOT bias toward index 0). difficulty 1=Conceptual 2=Applied 3=Creative. Skip if the chunk is a transition, recap, or has no substantial concept worth reasoning about.
+  · Distractor quality (CRITICAL): every wrong option must be a plausible misconception. All four options must be similar in length, grammatical structure, and level of detail. Distractors should reflect partial understanding or near-miss alternatives. No joke options, no "all/none of the above", no obvious throwaways. Don't let surface features (length, hedging words like always/never, tone, category) reveal the answer.
 
 - Return [] for any category with nothing genuinely worthwhile.`
 
@@ -233,10 +247,64 @@ Rules:
         height: Math.max(3, Math.min(100 - r.y, r.height)),
       }))
 
+    // Randomise option order on each question so the correct answer isn't
+    // always at position 0 (LLMs anchor to the prompt's JSON example).
+    const shuffleQuestion = (q) => {
+      if (!Array.isArray(q?.options) || typeof q?.correctIndex !== 'number') return q
+      const idx = q.options.map((_, i) => i)
+      for (let i = idx.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1))
+        ;[idx[i], idx[j]] = [idx[j], idx[i]]
+      }
+      return { ...q, options: idx.map((i) => q.options[i]), correctIndex: idx.indexOf(q.correctIndex) }
+    }
+    const questions = Array.isArray(parsed.questions) ? parsed.questions.map(shuffleQuestion) : []
+
+    // Server-side safety net: enforce dedup (case-insensitive) and reject
+    // generic / off-domain words even if the model ignores the prompt rules.
+    const TERM_BLOCKLIST = new Set([
+      'dosage', 'efficacy', 'drug', 'treatment', 'medicine', 'dose', 'dose-response',
+      'low dose', 'high dose', 'low dosage', 'medium dosage', 'high dosage',
+      'drug response', 'dosage input', 'efficacy axis', 'dosage axis',
+      'graph', 'line', 'curve', 'axis', 'value', 'number', 'equation', 'point',
+      'dot', 'label', 'box', 'arrow', 'diagram', 'sketch', 'notation', 'insight',
+      'summary', 'range', 'scale', 'amount', 'output', 'input box',
+      'fancy graph', 'blue curve', 'yellow dot', 'red box', 'green curve',
+      'mathematical notation', 'connection values', 'curved node',
+    ])
+    const prevTermSet = new Set((previousTerms ?? []).map((t) => String(t).toLowerCase().trim()))
+    const seenTerms = new Set()
+    const glossaryTerms = (Array.isArray(parsed.glossaryTerms) ? parsed.glossaryTerms : [])
+      .filter((g) => {
+        const term = String(g?.term ?? '').toLowerCase().trim()
+        if (!term) return false
+        if (TERM_BLOCKLIST.has(term)) return false
+        if (prevTermSet.has(term)) return false
+        if (seenTerms.has(term)) return false
+        seenTerms.add(term)
+        return true
+      })
+
+    // Highlight dedup — fuzzy match on lowercased substring so "neural network diagram"
+    // doesn't surface twice as "the neural network diagram" etc.
+    const prevHighlightTexts = (previousHighlights ?? []).map((h) => String(h).toLowerCase().trim())
+    const seenHighlights = new Set()
+    const highlights = (Array.isArray(parsed.highlights) ? parsed.highlights : [])
+      .filter((h) => {
+        const text = String(h?.text ?? '').toLowerCase().trim()
+        if (!text) return false
+        if (seenHighlights.has(text)) return false
+        // fuzzy: reject if text is contained in / contains any previous highlight
+        const isDupe = prevHighlightTexts.some((p) => p.includes(text) || text.includes(p))
+        if (isDupe) return false
+        seenHighlights.add(text)
+        return true
+      })
+
     res.json({
-      glossaryTerms: Array.isArray(parsed.glossaryTerms) ? parsed.glossaryTerms : [],
-      highlights:    Array.isArray(parsed.highlights)    ? parsed.highlights    : [],
-      questions:     Array.isArray(parsed.questions)     ? parsed.questions     : [],
+      glossaryTerms,
+      highlights,
+      questions,
       regions,
     })
   } catch (err) {

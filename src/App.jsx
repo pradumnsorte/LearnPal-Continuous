@@ -59,7 +59,7 @@ const formatTime = (totalSeconds = 0) => {
 
 // ─── System prompt ───────────────────────────────────────────────────────────
 
-const buildSystemPrompt = (currentSeconds, quizHistory = [], messages = []) => {
+const buildSystemPrompt = (currentSeconds, quizHistory = [], messages = [], surfacedTerms = [], surfacedHighlights = [], surfacedQuestions = []) => {
   const mins = Math.floor(currentSeconds / 60)
   const secs = Math.floor(currentSeconds % 60)
   const timeStr = `${mins}:${String(secs).padStart(2, '0')}`
@@ -83,8 +83,20 @@ const buildSystemPrompt = (currentSeconds, quizHistory = [], messages = []) => {
         .join('\n')}`
     : ''
 
-  const sessionContext = quizBlock || snapBlock
-    ? `\n--- Session context ---${quizBlock}${snapBlock}\n`
+  const termBlock = surfacedTerms.length > 0
+    ? `\nGlossary terms already surfaced to the learner (assume basic familiarity, don't re-define from scratch):\n${surfacedTerms.slice(-10).map((t) => `- ${t}`).join('\n')}`
+    : ''
+
+  const highlightBlock = surfacedHighlights.length > 0
+    ? `\nVisual highlights the system has surfaced on screen:\n${surfacedHighlights.slice(-5).map((h) => `- ${h}`).join('\n')}`
+    : ''
+
+  const liveQBlock = surfacedQuestions.length > 0
+    ? `\nLive-feed questions already asked of the learner:\n${surfacedQuestions.slice(-5).map((q) => `- ${q}`).join('\n')}`
+    : ''
+
+  const sessionContext = (quizBlock || snapBlock || termBlock || highlightBlock || liveQBlock)
+    ? `\n--- Session context ---${quizBlock}${snapBlock}${termBlock}${highlightBlock}${liveQBlock}\n`
     : ''
 
   return `You are Pal, a friendly learning assistant embedded in LearnPal, a video learning app.
@@ -98,15 +110,15 @@ You are a subject-matter expert in machine learning and neural networks. Explain
 
 Never reference the video, transcript, or presenter as a source. Do not say "the transcript says", "in the video", "the presenter mentions", "as stated", or anything similar. You simply know this material — explain it that way. The background topics above are only to help you stay contextually relevant; they are not a script to follow or cite.
 
-Use the session context to personalise your responses — if the user got a quiz question wrong, directly address that misconception with a clear, corrective explanation.
+Use the session context to personalise your responses — if the user got a quiz question wrong, directly address that misconception with a clear, corrective explanation. If a glossary term or highlight has already been surfaced to the learner, build on it rather than re-defining it from scratch.
 
 Format your responses using markdown: use **bold** for key terms, bullet points or numbered lists for multi-part answers, and short paragraphs. Keep it conversational and clear — like a brilliant tutor who genuinely loves the subject.`
 }
 
 // ─── AI chat ─────────────────────────────────────────────────────────────────
 
-const callAI = async (provider, messages, currentSeconds, sessionId = null, quizHistory = [], source = 'chat') => {
-  const systemPrompt = buildSystemPrompt(currentSeconds, quizHistory, messages)
+const callAI = async (provider, messages, currentSeconds, sessionId = null, quizHistory = [], source = 'chat', surfacedTerms = [], surfacedHighlights = [], surfacedQuestions = []) => {
+  const systemPrompt = buildSystemPrompt(currentSeconds, quizHistory, messages, surfacedTerms, surfacedHighlights, surfacedQuestions)
   const res = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -122,11 +134,11 @@ const callAI = async (provider, messages, currentSeconds, sessionId = null, quiz
 
 // ─── Live analysis ────────────────────────────────────────────────────────────
 
-const callAnalyse = async (provider, chunk, previousTerms, previousQuestions, frameBase64 = null, previousHighlights = []) => {
+const callAnalyse = async (provider, chunk, previousTerms, previousQuestions, frameBase64 = null, previousHighlights = [], chatContext = '') => {
   const res = await fetch('/api/analyse', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ provider, chunk, previousTerms, previousQuestions, frameBase64, previousHighlights }),
+    body: JSON.stringify({ provider, chunk, previousTerms, previousQuestions, frameBase64, previousHighlights, chatContext }),
   })
   if (!res.ok) throw new Error(`Analyse error ${res.status}`)
   return res.json()
@@ -166,20 +178,32 @@ ${transcriptContext}${previousBlock}
 Difficulty: ${level.label}
 ${level.instruction}
 
+QUALITY GATE — read carefully:
+- The question MUST test understanding of a concept that has been substantively explained in the transcript above. Skim mentions, name-drops, and forward references ("we'll cover this later") DO NOT count as explained.
+- The question must make the learner THINK and apply understanding — not recall a specific phrase, number, or wording from the video. Ask "why does this work?", "what would happen if…?", "which of these is an example of X?" style questions.
+- Never ask "what did the speaker say about Y?" or test verbatim facts.
+- Do NOT invent context. Do NOT test general background knowledge that wasn't covered.
+
 Generate exactly ONE multiple-choice quiz question.
 
 Respond ONLY with a valid JSON object — no markdown, no explanation, nothing else:
 {
   "question": "...",
   "options": ["...", "...", "...", "..."],
-  "correctIndex": 0,
+  "correctIndex": <integer 0-3>,
   "explanation": "..."
 }
 
 Rules:
 - Exactly 4 options
-- correctIndex is 0-based
-- Explanation: 1-2 sentences clarifying why the answer is correct`
+- correctIndex is 0-based — vary which position is correct across questions; the option order is randomised after generation, so DO NOT bias toward index 0
+- Distractor quality (CRITICAL):
+  · Every wrong option must be a plausible misconception a learner could genuinely hold — not an obvious throwaway
+  · All four options must be similar in length, grammatical structure, and level of detail (no "long correct option, short wrong options" tell)
+  · Distractors should reflect partial understanding, common confusions, or near-miss alternatives — not unrelated facts
+  · No joke options, no "all of the above", no "none of the above", no "I don't know"
+  · Avoid options that can be eliminated by surface features (tone, hedging words like "always"/"never", category mismatch)
+- Explanation: 1-2 sentences clarifying why the answer is correct AND why the most tempting distractor is wrong`
 }
 
 const callQuizAPI = async (provider, prompt) => {
@@ -206,7 +230,7 @@ const generateQuizQuestion = async (provider, currentSeconds, previousQuestions 
 
 // ─── Glossary ─────────────────────────────────────────────────────────────────
 
-function Glossary({ currentSeconds, aiProvider, analyseError, onCycleProvider, items = [] }) {
+function Glossary({ currentSeconds, aiProvider, analyseError, onCycleProvider, items = [], logEvent = () => {} }) {
   const [isPaused, setIsPaused] = useState(false)
   const [frozenAt, setFrozenAt] = useState(null)
   const [removedIds, setRemovedIds] = useState(new Set())
@@ -290,7 +314,11 @@ function Glossary({ currentSeconds, aiProvider, analyseError, onCycleProvider, i
         ) : (
           <ul className="lp-glossary-list">
             {sorted.map((g) => (
-              <li key={g.id} className={`lp-glossary-item${newIds.has(g.id) ? ' lp-glossary-new' : ''}${pinnedIds.has(g.id) ? ' lp-glossary-pinned' : ''}`}>
+              <li
+                key={g.id}
+                className={`lp-glossary-item${newIds.has(g.id) ? ' lp-glossary-new' : ''}${pinnedIds.has(g.id) ? ' lp-glossary-pinned' : ''}`}
+                onClick={() => logEvent('glossary_term_clicked', currentSeconds, { term: g.term })}
+              >
                 <div className="lp-glossary-header">
                   <span className="lp-glossary-term">
                     {pinnedIds.has(g.id) && <span className="lp-pin-dot" aria-label="Pinned" />}
@@ -428,7 +456,7 @@ function Highlights({ currentSeconds, onSeek, onPause, onDetailClick, onShowRegi
     <section className="lp-highlights">
       <div className="lp-section-header-row">
         <div className="lp-section-heading-group">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" stroke="#0336ff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
           <h2>Explore highlights</h2>
@@ -651,7 +679,7 @@ function LiveQuestionFeed({ currentSeconds, onAnswered, onExplainAnswer, quizDif
     <section className="lp-question-feed">
       <div className="lp-section-header-row">
         <div className="lp-section-heading-group">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" stroke="#0336ff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
           <h2>Live question feed</h2>
@@ -891,6 +919,9 @@ export default function App() {
   const [aiProvider, setAiProvider] = useState(PROVIDERS.AZURE_54)
   const [sessionId, setSessionId]   = useState(null)
   const [participantId, setParticipantId] = useState('')
+  const [pidInput, setPidInput] = useState('')
+  const [pidConfirmed, setPidConfirmed] = useState(false)
+  const [modalDismissed, setModalDismissed] = useState(false)  // skip = dismiss modal without creating a session
 
   // Chat state
   const [messages, setMessages]   = useState([])
@@ -922,6 +953,8 @@ export default function App() {
   const [frameRegions, setFrameRegions]     = useState([]) // overlays on video
   const lastAnalysedRowRef      = useRef(-1)
   const isAnalysingRef          = useRef(false)
+  // Throttle new questions so feed pacing matches Proactive (~1 per 100s ≈ 10 per 17-min video)
+  const lastQuestionAtRef       = useRef(-Infinity)
   const liveGlossaryRef         = useRef([])
   const liveQuestionsRef        = useRef([])
   const liveHighlightsRef       = useRef([])
@@ -930,15 +963,16 @@ export default function App() {
   // ── Session creation ───────────────────────────────────────────────────────
 
   useEffect(() => {
+    if (!pidConfirmed) return
     fetch('/api/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ videoId: VIDEO_ID, videoTitle: 'The Essential Main Ideas of Neural Networks', paradigm: 'continuous' }),
+      body: JSON.stringify({ videoId: VIDEO_ID, videoTitle: 'The Essential Main Ideas of Neural Networks', paradigm: 'continuous', participantId: pidInput.trim() || null }),
     })
       .then((r) => r.json())
       .then((data) => setSessionId(data.id))
       .catch(() => {})
-  }, [])
+  }, [pidConfirmed])
 
   // ── Video content bounds — maps region coords (% of frame) to stage coords ──
   // The stage may not be 16:9 (compact mode shrinks height while width stays
@@ -1011,8 +1045,15 @@ export default function App() {
     const prevTerms      = liveGlossaryRef.current.map((g) => g.term)
     const prevQs         = liveQuestionsRef.current.map((q) => q.question)
     const prevHighlights = liveHighlightsRef.current.map((h) => h.text)
+    // Build a short chat context string from the last few user messages so
+    // analyse won't re-surface concepts already explored via chat.
+    const chatContext = messages
+      .filter((m) => m.role === 'user')
+      .slice(-4)
+      .map((m) => (m.content ?? '').slice(0, 120))
+      .join(' | ')
 
-    callAnalyse(aiProvider, chunk, prevTerms, prevQs, frameBase64, prevHighlights)
+    callAnalyse(aiProvider, chunk, prevTerms, prevQs, frameBase64, prevHighlights, chatContext)
       .then((result) => {
         const hasQuestion = result.questions?.length > 0
         const advance = hasQuestion ? chunk.length : Math.max(2, Math.floor(chunk.length / 2))
@@ -1031,9 +1072,16 @@ export default function App() {
           setLiveHighlights((prev) => [...prev, ...newHighlights])
         }
         if (hasQuestion) {
-          const newQs = result.questions.map((q, i) => ({ ...q, id: `q-${Date.now()}-${i}`, ...stamp }))
-          liveQuestionsRef.current = [...liveQuestionsRef.current, ...newQs]
-          setLiveQuestions((prev) => [...prev, ...newQs])
+          // Pace gate: only accept a new question if at least 100s of playback time has
+          // passed since the last one was added — and only keep ONE question per chunk.
+          const QUESTION_MIN_GAP = 100
+          if (arrivedAt - lastQuestionAtRef.current >= QUESTION_MIN_GAP) {
+            const firstQ = result.questions[0]
+            const newQs = [{ ...firstQ, id: `q-${Date.now()}-0`, ...stamp }]
+            lastQuestionAtRef.current = arrivedAt
+            liveQuestionsRef.current = [...liveQuestionsRef.current, ...newQs]
+            setLiveQuestions((prev) => [...prev, ...newQs])
+          }
         }
 
         // Visual regions — show overlays on video, add to Explore Highlights
@@ -1072,7 +1120,7 @@ export default function App() {
   // ── Event logging ──────────────────────────────────────────────────────────
 
   const logEvent = useCallback((eventType, playbackSeconds = null, meta = null) => {
-    if (!sessionId) return
+    if (!pidConfirmed || !sessionId) return
     const body = JSON.stringify({ sessionId, eventType, playbackSeconds, meta })
     if (eventType === 'session_end') {
       navigator.sendBeacon('/api/events', new Blob([body], { type: 'application/json' }))
@@ -1083,7 +1131,7 @@ export default function App() {
         body,
       }).catch(() => {})
     }
-  }, [sessionId])
+  }, [sessionId, pidConfirmed])
 
   useEffect(() => { logEventRef.current = logEvent }, [logEvent])
 
@@ -1299,6 +1347,10 @@ export default function App() {
     logEvent('chat_message_sent', currentPlaybackSeconds, { char_count: clean.length, source })
 
     try {
+      // Cross-feature context: keywords/highlights/questions already shown
+      const surfacedTerms     = liveGlossaryRef.current.map((g) => g.term)
+      const surfacedHighlights = liveHighlightsRef.current.map((h) => h.text)
+      const surfacedQuestions  = liveQuestionsRef.current.map((q) => q.question)
       const reply = await callAI(
         aiProvider,
         updated.map(({ role, content: c }) => ({ role, content: c })),
@@ -1306,6 +1358,9 @@ export default function App() {
         sessionId,
         quizHistory,
         source,
+        surfacedTerms,
+        surfacedHighlights,
+        surfacedQuestions,
       )
       setMessages((prev) => [...prev, { role: 'assistant', content: reply }])
     } catch (err) {
@@ -1465,15 +1520,26 @@ export default function App() {
     setFeedDifficulty(1)
     setFeedConsecCorrect(0)
     firstInteractionLoggedRef.current = false
+
+    // Clear live analyse state so the next participant starts fresh
+    setLiveGlossary([])
+    setLiveHighlights([])
+    setLiveQuestions([])
+    setFrameRegions([])
+    setAnswers({})
+    liveGlossaryRef.current = []
+    liveHighlightsRef.current = []
+    liveQuestionsRef.current = []
+    lastAnalysedRowRef.current = -1
+    lastQuestionAtRef.current = -Infinity
+    isAnalysingRef.current = false
+
+    // Reset participant flow — drop the session and re-show the PID modal
+    setSessionId(null)
     setParticipantId('')
-    fetch('/api/sessions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ videoId: VIDEO_ID, videoTitle: 'The Essential Main Ideas of Neural Networks', paradigm: 'continuous' }),
-    })
-      .then((r) => r.json())
-      .then((data) => setSessionId(data.id))
-      .catch(() => {})
+    setPidInput('')
+    setPidConfirmed(false)
+    setModalDismissed(false)
   }
 
   const seekPercent = duration > 0 ? (currentPlaybackSeconds / duration) * 100 : 0
@@ -1736,8 +1802,44 @@ export default function App() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
+  const confirmPid = () => {
+    const trimmed = pidInput.trim()
+    if (!trimmed) return
+    setParticipantId(trimmed)
+    saveParticipantId(trimmed)
+    setPidConfirmed(true)
+  }
+
   return (
     <div className="lp-root">
+      {!pidConfirmed && !modalDismissed && (
+        <div className="lp-pid-backdrop">
+          <button className="lp-pid-skip" type="button" onClick={() => setModalDismissed(true)}>skip</button>
+          <div className="lp-pid-modal">
+            <div>
+              <h2>Enter Participant ID</h2>
+              <p style={{ marginTop: 6 }}>Enter the participant ID assigned by the researcher before starting the session.</p>
+            </div>
+            <input
+              className="lp-pid-input"
+              type="text"
+              placeholder="e.g. P01"
+              value={pidInput}
+              autoFocus
+              onChange={(e) => setPidInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') confirmPid() }}
+            />
+            <button
+              className="lp-pid-submit"
+              type="button"
+              disabled={!pidInput.trim()}
+              onClick={confirmPid}
+            >
+              Start Session
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Header */}
       <header className="lp-header">
@@ -1992,6 +2094,7 @@ export default function App() {
                                   } else {
                                     playerRef.current?.setPlaybackRate(r)
                                   }
+                                  logEvent('playback_speed_changed', currentPlaybackSeconds, { from: playbackRate, to: r })
                                   setPlaybackRate(r)
                                   setShowSpeedMenu(false)
                                 }}
@@ -2003,17 +2106,11 @@ export default function App() {
                         )}
                       </div>
 
-                      {/* Fullscreen */}
-                      <button type="button" className="lp-ctrl-btn" onClick={toggleFullscreen} aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}>
-                        {isFullscreen ? (
-                          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                            <path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z" />
-                          </svg>
-                        ) : (
-                          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                            <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" />
-                          </svg>
-                        )}
+                      {/* Fullscreen — disabled for study */}
+                      <button type="button" className="lp-ctrl-btn lp-ctrl-btn--disabled" title="Fullscreen is disabled for this study" aria-disabled="true">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                          <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" />
+                        </svg>
                       </button>
                     </div>
                   </div>
@@ -2054,8 +2151,8 @@ export default function App() {
             <section className="lp-transcripts">
               <div className="lp-transcripts-header">
                 <h2>Transcripts</h2>
+                <div className="lp-transcripts-divider" />
               </div>
-              <div className="lp-transcripts-divider" />
               <ul
                 className="lp-transcript-list"
                 ref={transcriptListRef}
@@ -2102,6 +2199,7 @@ export default function App() {
                   })
                 }}
                 items={liveGlossary}
+                logEvent={logEvent}
               />
             </div>
 

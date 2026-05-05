@@ -5,3 +5,6 @@ server/learnpal.db
 server/learnpal.db-shm
 server/learnpal.db-wal
 .claude/
+
+# Large video assets
+public/neural-networks.mp4

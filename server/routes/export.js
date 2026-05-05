@@ -10,7 +10,15 @@ const ALIAS = {
   quiz_explained:   ['explain_answer_clicked'],
   quiz_reviewed:    ['feed_question_jumped'],
   paradigm_feature: ['highlight_detail_clicked', 'feed_paused', 'feed_resumed', 'chat_suggestion_clicked', 'feed_question_unlocked'],
+  ai_shown:     ['feed_question_unlocked', 'highlight_detail_clicked'],
+  ai_accepted:  ['feed_question_answered', 'highlight_detail_clicked', 'explain_answer_clicked', 'glossary_term_clicked'],
+  ai_rejected:  ['feed_question_skipped', 'feed_paused'],
+  icap_active:        ['video_pause', 'video_seek', 'transcript_clicked', 'glossary_term_clicked'],
+  icap_constructive:  ['chat_message_sent', 'feed_question_answered', 'explain_answer_clicked', 'highlight_detail_clicked', 'chat_suggestion_clicked'],
+  icap_interactive:   [],
 }
+
+const VIDEO_DURATION_SECONDS = 1080
 
 const toCsv = (rows, headers) => {
   if (rows.length === 0) return headers.join(',')
@@ -72,18 +80,10 @@ const buildComparableRows = () => {
     const activeVideoSeconds = Math.round(
       sumPairedDeltas(events, 'video_play', ['video_pause', 'video_ended', 'session_end'])
     )
-    const tabBlurredSeconds = Math.round(
-      sumPairedDeltas(events, 'tab_blurred', ['tab_focused', 'session_end'])
-    )
 
     const countByType = (types) => events.filter((e) => types.includes(e.event_type)).length
 
     const seekEvents = events.filter((e) => e.event_type === 'video_seek')
-    const parseMetaDelta = (e) => {
-      try { return JSON.parse(e.meta ?? '{}').delta ?? 0 } catch { return 0 }
-    }
-    const videoSeeksBackward = seekEvents.filter((e) => parseMetaDelta(e) < 0).length
-    const videoSeeksForward  = seekEvents.filter((e) => parseMetaDelta(e) > 0).length
 
     const total = attempts.length
     const correct = attempts.filter((a) => a.is_correct === 1).length
@@ -94,19 +94,10 @@ const buildComparableRows = () => {
       if (valid.length === 0) return null
       return Math.round((valid.reduce((a, b) => a + b, 0) / valid.length) * 100) / 100
     }
-    const avgTimeAll     = timeMean(attempts)
-    const avgTimeCorrect = timeMean(attempts.filter((a) => a.is_correct === 1))
-    const avgTimeWrong   = timeMean(attempts.filter((a) => a.is_correct === 0))
-    const highestDiff    = attempts.reduce((m, a) => Math.max(m, a.difficulty ?? 0), 0) || null
-
-    const diffStats = (lvl) => {
-      const sub = attempts.filter((a) => a.difficulty === lvl)
-      return { attempts: sub.length, correct: sub.filter((a) => a.is_correct === 1).length }
-    }
-    const d1 = diffStats(1), d2 = diffStats(2), d3 = diffStats(3)
+    const avgTimeAll  = timeMean(attempts)
+    const highestDiff = attempts.reduce((m, a) => Math.max(m, a.difficulty ?? 0), 0) || null
 
     return {
-      session_id: s.id,
       participant_id: s.participant_id ?? '',
       paradigm: s.paradigm ?? PARADIGM,
       started_at: s.created_at,
@@ -114,63 +105,69 @@ const buildComparableRows = () => {
       session_duration_seconds: sessionDurationSeconds ?? '',
       active_video_seconds: activeVideoSeconds,
       final_video_position_seconds: finalVideoPosition ?? '',
+      video_completion_pct: finalVideoPosition != null
+        ? Math.min(100, Math.round((finalVideoPosition / VIDEO_DURATION_SECONDS) * 1000) / 10)
+        : '',
       time_to_first_interaction_seconds: timeToFirstInteractionSeconds ?? '',
 
       chat_messages_sent: messagesSent,
       transcript_clicks: countByType(['transcript_clicked']),
       video_pauses: countByType(['video_pause']),
       video_seeks_total: seekEvents.length,
-      video_seeks_backward: videoSeeksBackward,
-      video_seeks_forward: videoSeeksForward,
-      tab_blurred_count: countByType(['tab_blurred']),
-      tab_blurred_seconds_total: tabBlurredSeconds,
-
-      quiz_explanations_requested: countByType(ALIAS.quiz_explained),
-      quiz_reviewed_count: countByType(ALIAS.quiz_reviewed),
+      playback_speed_changes: countByType(['playback_speed_changed']),
 
       quiz_attempts_total: total,
       quiz_correct: correct,
       quiz_accuracy_pct: accuracyPct ?? '',
       quiz_skipped_total: countByType(ALIAS.quiz_skipped),
       avg_time_to_answer_seconds: avgTimeAll ?? '',
-      avg_time_to_correct_seconds: avgTimeCorrect ?? '',
-      avg_time_to_wrong_seconds: avgTimeWrong ?? '',
       highest_difficulty_reached: highestDiff ?? '',
-      diff1_attempts: d1.attempts, diff1_correct: d1.correct,
-      diff2_attempts: d2.attempts, diff2_correct: d2.correct,
-      diff3_attempts: d3.attempts, diff3_correct: d3.correct,
+      quiz_explanations_requested: countByType(ALIAS.quiz_explained),
+      quiz_reviewed_count: countByType(ALIAS.quiz_reviewed),
 
-      snaps_taken: 0,
       paradigm_feature_engagements: countByType(ALIAS.paradigm_feature),
+
+      ai_suggestions_shown:    countByType(ALIAS.ai_shown),
+      ai_suggestions_accepted: countByType(ALIAS.ai_accepted),
+      ai_suggestions_rejected: countByType(ALIAS.ai_rejected),
+      ai_acceptance_rate_pct: (() => {
+        const shown = countByType(ALIAS.ai_shown)
+        const acc   = countByType(ALIAS.ai_accepted)
+        return shown > 0 ? Math.round((acc / shown) * 1000) / 10 : ''
+      })(),
+
+      icap_active_events:       countByType(ALIAS.icap_active),
+      icap_constructive_events: countByType(ALIAS.icap_constructive),
+      icap_interactive_events:  countByType(ALIAS.icap_interactive),
     }
   })
 }
 
 router.get('/', (req, res) => {
   const rows = buildComparableRows()
-  const headers = rows[0] ? Object.keys(rows[0]) : ['session_id']
+  const headers = rows[0] ? Object.keys(rows[0]) : ['participant_id']
   sendCsv(res, 'learnpal-sessions.csv', toCsv(rows, headers))
 })
 
 router.get('/messages', (req, res) => {
   const rows = db.prepare(`
-    SELECT m.id, m.session_id, s.participant_id, s.paradigm, m.role, m.provider, m.source, m.content, m.created_at
+    SELECT s.participant_id, s.paradigm, m.role, m.provider, m.source, m.created_at
     FROM messages m JOIN sessions s ON s.id = m.session_id
     ORDER BY m.session_id ASC, m.created_at ASC
   `).all()
-  const headers = ['id', 'session_id', 'participant_id', 'paradigm', 'role', 'provider', 'source', 'content', 'created_at']
+  const headers = ['participant_id', 'paradigm', 'role', 'provider', 'source', 'created_at']
   sendCsv(res, 'learnpal-messages.csv', toCsv(rows, headers))
 })
 
 router.get('/quizzes', (req, res) => {
   const rows = db.prepare(`
-    SELECT q.id, q.session_id, s.participant_id, s.paradigm, q.question, q.options, q.correct_index,
+    SELECT s.participant_id, s.paradigm, q.question, q.correct_index,
            q.selected_index, q.is_correct, q.difficulty, q.provider,
            q.time_to_answer_seconds, q.created_at
     FROM quiz_attempts q JOIN sessions s ON s.id = q.session_id
     ORDER BY q.session_id ASC, q.created_at ASC
   `).all()
-  const headers = ['id', 'session_id', 'participant_id', 'paradigm', 'question', 'options', 'correct_index',
+  const headers = ['participant_id', 'paradigm', 'question', 'correct_index',
                    'selected_index', 'is_correct', 'difficulty', 'provider',
                    'time_to_answer_seconds', 'created_at']
   sendCsv(res, 'learnpal-quizzes.csv', toCsv(rows, headers))
@@ -178,53 +175,43 @@ router.get('/quizzes', (req, res) => {
 
 router.get('/snaps', (req, res) => {
   const rows = db.prepare(`
-    SELECT n.id, n.session_id, s.participant_id, s.paradigm, n.timestamp_seconds, n.timestamp_str,
-           n.region, n.user_prompt, n.ai_response, n.provider, n.created_at
+    SELECT s.participant_id, s.paradigm, n.timestamp_seconds, n.timestamp_str,
+           n.region, n.user_prompt, n.provider, n.created_at
     FROM snaps n JOIN sessions s ON s.id = n.session_id
     ORDER BY n.session_id ASC, n.created_at ASC
   `).all()
-  const headers = ['id', 'session_id', 'participant_id', 'paradigm', 'timestamp_seconds', 'timestamp_str',
-                   'region', 'user_prompt', 'ai_response', 'provider', 'created_at']
+  const headers = ['participant_id', 'paradigm', 'timestamp_seconds', 'timestamp_str',
+                   'region', 'user_prompt', 'provider', 'created_at']
   sendCsv(res, 'learnpal-snaps.csv', toCsv(rows, headers))
 })
 
 router.get('/events', (req, res) => {
   const rows = db.prepare(`
-    SELECT e.id, e.session_id, s.participant_id, s.paradigm, e.event_type, e.playback_seconds, e.meta, e.created_at
+    SELECT s.participant_id, s.paradigm, e.session_id, e.event_type, e.playback_seconds, e.meta, e.created_at
     FROM events e JOIN sessions s ON s.id = e.session_id
     ORDER BY e.session_id ASC, e.created_at ASC
   `).all()
-  const headers = ['id', 'session_id', 'participant_id', 'paradigm', 'event_type', 'playback_seconds', 'meta', 'created_at']
+  const headers = ['participant_id', 'paradigm', 'session_id', 'event_type', 'playback_seconds', 'meta', 'created_at']
   sendCsv(res, 'learnpal-events.csv', toCsv(rows, headers))
 })
 
 router.get('/comparable', (req, res) => {
   const rows = buildComparableRows()
-  const headers = rows[0] ? Object.keys(rows[0]) : ['session_id']
+  const headers = rows[0] ? Object.keys(rows[0]) : ['participant_id']
   sendCsv(res, 'learnpal-comparable.csv', toCsv(rows, headers))
 })
 
 router.get('/all', (req, res) => {
   const comparable = buildComparableRows()
 
-  const summary = db.prepare(`
-    SELECT s.id AS session_id, s.participant_id, s.paradigm, s.video_id, s.video_title, s.created_at,
-      (SELECT COUNT(*) FROM messages       WHERE session_id = s.id) AS messages_sent,
-      (SELECT COUNT(*) FROM snaps          WHERE session_id = s.id) AS snaps_taken,
-      (SELECT COUNT(*) FROM quiz_attempts  WHERE session_id = s.id) AS quiz_attempts,
-      (SELECT COUNT(*) FROM quiz_attempts  WHERE session_id = s.id AND is_correct = 1) AS quiz_correct,
-      (SELECT playback_seconds FROM events WHERE session_id = s.id AND event_type = 'session_end' ORDER BY created_at DESC LIMIT 1) AS final_video_position
-    FROM sessions s ORDER BY s.created_at ASC
-  `).all()
-
   const messages = db.prepare(`
-    SELECT m.id, m.session_id, s.participant_id, s.paradigm, m.role, m.provider, m.source, m.content, m.created_at
+    SELECT s.participant_id, s.paradigm, m.role, m.provider, m.source, m.created_at
     FROM messages m JOIN sessions s ON s.id = m.session_id
     ORDER BY m.session_id ASC, m.created_at ASC
   `).all()
 
   const quizzes = db.prepare(`
-    SELECT q.id, q.session_id, s.participant_id, s.paradigm, q.question, q.options, q.correct_index,
+    SELECT s.participant_id, s.paradigm, q.question, q.correct_index,
            q.selected_index, q.is_correct, q.difficulty, q.provider,
            q.time_to_answer_seconds, q.created_at
     FROM quiz_attempts q JOIN sessions s ON s.id = q.session_id
@@ -232,21 +219,20 @@ router.get('/all', (req, res) => {
   `).all()
 
   const snaps = db.prepare(`
-    SELECT n.id, n.session_id, s.participant_id, s.paradigm, n.timestamp_seconds, n.timestamp_str,
-           n.region, n.user_prompt, n.ai_response, n.provider, n.created_at
+    SELECT s.participant_id, s.paradigm, n.timestamp_seconds, n.timestamp_str,
+           n.region, n.user_prompt, n.provider, n.created_at
     FROM snaps n JOIN sessions s ON s.id = n.session_id
     ORDER BY n.session_id ASC, n.created_at ASC
   `).all()
 
   const events = db.prepare(`
-    SELECT e.id, e.session_id, s.participant_id, s.paradigm, e.event_type, e.playback_seconds, e.meta, e.created_at
+    SELECT s.participant_id, s.paradigm, e.session_id, e.event_type, e.playback_seconds, e.meta, e.created_at
     FROM events e JOIN sessions s ON s.id = e.session_id
     ORDER BY e.session_id ASC, e.created_at ASC
   `).all()
 
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(comparable), 'Comparable')
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary),    'Summary')
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(messages),   'Messages')
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(quizzes),    'Quizzes')
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(snaps),      'Snaps')

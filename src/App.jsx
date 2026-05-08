@@ -6,7 +6,10 @@ import brandIcon from './assets/brand-icon.svg'
 import palCharacter from './assets/pal-character.svg'
 import chatgptLogo from './assets/Chat GPT logo.png'
 
+const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true'
+  || (typeof window !== 'undefined' && window.location.hostname.endsWith('.onrender.com'))
 const VIDEO_ID = 'CqOfi41LfDw'
+const VIDEO_SRC = import.meta.env.VITE_VIDEO_URL || '/neural-networks.mp4'
 
 // ─── YouTube API ────────────────────────────────────────────────────────────
 
@@ -921,7 +924,7 @@ export default function App() {
   const [participantId, setParticipantId] = useState('')
   const [pidInput, setPidInput] = useState('')
   const [pidConfirmed, setPidConfirmed] = useState(false)
-  const [modalDismissed, setModalDismissed] = useState(false)  // skip = dismiss modal without creating a session
+  const [modalDismissed, setModalDismissed] = useState(DEMO_MODE)  // skip = dismiss modal without creating a session
 
   // Chat state
   const [messages, setMessages]   = useState([])
@@ -1954,7 +1957,7 @@ export default function App() {
                 />
                 <video
                   ref={localVideoRef}
-                  src="/neural-networks.mp4"
+                  src={VIDEO_SRC}
                   className="lp-youtube-player"
                   style={{
                     display: videoSource === 'local' ? 'block' : 'none',
@@ -2306,7 +2309,7 @@ export default function App() {
       </main>
 
       {/* Researcher panel */}
-      <div className="lp-researcher-panel">
+      {!DEMO_MODE && <div className="lp-researcher-panel">
         <input
           type="text"
           className="lp-researcher-input"
@@ -2323,7 +2326,7 @@ export default function App() {
         <a className="lp-researcher-export" href="/api/export/all" target="_blank" rel="noreferrer">
           Export Excel
         </a>
-      </div>
+      </div>}
 
     </div>
   )

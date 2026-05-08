@@ -1,6 +1,9 @@
 import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { existsSync } from 'node:fs'
 import sessionsRouter from './routes/sessions.js'
 import chatRouter from './routes/chat.js'
 import quizRouter from './routes/quiz.js'
@@ -9,10 +12,15 @@ import eventsRouter from './routes/events.js'
 import exportRouter from './routes/export.js'
 import analyseRouter from './routes/analyse.js'
 
+const __dirname = dirname(fileURLToPath(import.meta.url))
+
 const app = express()
 const PORT = process.env.PORT || 3002
 
-app.use(cors({ origin: 'http://localhost:5174' }))
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGIN
+  ? [process.env.ALLOWED_ORIGIN, 'http://localhost:5174']
+  : ['http://localhost:5174']
+app.use(cors({ origin: ALLOWED_ORIGINS }))
 app.use(express.json({ limit: '10mb' }))  // 10mb for base64 snap images
 
 app.use('/api/sessions', sessionsRouter)
@@ -41,6 +49,13 @@ const checkEnv = () => {
   }
 }
 checkEnv()
+
+// Serve the React build in production
+const distPath = join(__dirname, '../dist')
+if (existsSync(distPath)) {
+  app.use(express.static(distPath))
+  app.get('*', (_req, res) => res.sendFile(join(distPath, 'index.html')))
+}
 
 app.listen(PORT, () => {
   console.log(`LearnPal server running on http://localhost:${PORT}`)

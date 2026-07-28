@@ -41,9 +41,15 @@ export const requireBrowserOrigin = (req, res, next) => {
 // ── Per-IP rate limit ────────────────────────────────────────────────────────
 // In-memory only: the demo runs as a single instance, and a restart clearing
 // the counters is acceptable for what this defends against.
+//
+// Sizing: the continuous and proactive paradigms call /api/analyse ambiently
+// while the video plays — roughly one call per 13s of playback, so about 47 in
+// any 10-minute window, and ~100 across a full 18-minute watch, before chat and
+// quizzes. The ceiling has to clear that comfortably or it throttles a genuine
+// visitor mid-video, and it needs headroom for several people behind one NAT.
 
 const WINDOW_MS = Number(process.env.LLM_RATE_WINDOW_MS) || 10 * 60 * 1000
-const MAX_CALLS = Number(process.env.LLM_RATE_MAX) || 60
+const MAX_CALLS = Number(process.env.LLM_RATE_MAX) || 300
 
 const hits = new Map()
 

@@ -9,7 +9,9 @@ import chatgptLogo from './assets/Chat GPT logo.png'
 const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true'
   || (typeof window !== 'undefined' && window.location.hostname.endsWith('.onrender.com'))
 const VIDEO_ID = 'CqOfi41LfDw'
-const VIDEO_SRC = import.meta.env.VITE_VIDEO_URL || '/neural-networks.mp4'
+// Always served by this app from public/. Deliberately not env-overridable:
+// pointing this at a third-party host (archive.org) made playback stall.
+const VIDEO_SRC = '/neural-networks.mp4'
 
 // ─── YouTube API ────────────────────────────────────────────────────────────
 
@@ -39,7 +41,10 @@ const loadYouTubeIframeApi = () => {
 // ─── AI providers ────────────────────────────────────────────────────────────
 
 const PROVIDERS = { GROQ: 'groq', AZURE: 'azure', AZURE_54: 'azure-54', OLLAMA: 'ollama' }
-const PROVIDER_CYCLE = [PROVIDERS.AZURE, PROVIDERS.AZURE_54, PROVIDERS.GROQ, PROVIDERS.OLLAMA]
+// Groq (no valid key) and Ollama (needs localhost:11434) are unreachable in the
+// hosted demo, so they stay out of the cycle — labels below are kept so any
+// persisted value still renders.
+const PROVIDER_CYCLE = [PROVIDERS.AZURE, PROVIDERS.AZURE_54]
 const PROVIDER_LABELS = {
   [PROVIDERS.AZURE]:    { label: 'GPT-4o mini', logo: true },
   [PROVIDERS.AZURE_54]: { label: 'GPT-5.4 mini', logo: true },

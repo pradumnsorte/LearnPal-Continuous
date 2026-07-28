@@ -9,6 +9,7 @@ import snapsRouter from './routes/snaps.js'
 import eventsRouter from './routes/events.js'
 import exportRouter from './routes/export.js'
 import analyseRouter from './routes/analyse.js'
+import { llmGuards, requireExportAccess } from './guard.js'
 
 const app = express()
 const PORT = process.env.PORT || 3002
@@ -19,12 +20,17 @@ const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGIN
 app.use(cors({ origin: ALLOWED_ORIGINS }))
 app.use(express.json({ limit: '10mb' }))  // 10mb for base64 snap images
 
+// Guard the routes that spend provider credits (see server/guard.js).
+app.use('/api/chat',          llmGuards)
+app.use('/api/quiz/generate', llmGuards)
+app.use('/api/analyse',       llmGuards)
+
 app.use('/api/sessions', sessionsRouter)
 app.use('/api/chat',     chatRouter)
 app.use('/api/quiz',     quizRouter)
 app.use('/api/snaps',    snapsRouter)
 app.use('/api/events',   eventsRouter)
-app.use('/api/export',   exportRouter)
+app.use('/api/export',   requireExportAccess, exportRouter)
 app.use('/api/analyse',       analyseRouter)
 
 // ── Startup env-var sanity check ─────────────────────────────────────────────
